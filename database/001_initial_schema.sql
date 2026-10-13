@@ -74,4 +74,3 @@ CREATE INDEX idx_sale_items_product ON sale_items(product_id);
 
 
 
--- This is the initial schema, not the final database. We will add suppliers, purchase orders, stock movements, refunds, promotions, audit logs, and other advanced features in later migrations.
