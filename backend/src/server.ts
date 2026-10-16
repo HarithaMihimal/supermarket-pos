@@ -13,6 +13,7 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
+app.use(errorHandler);
 app.use(helmet());
 app.use(cors({
   origin: process.env.FRONTEND_URL,
@@ -51,6 +52,5 @@ async function start() {
   }
 }
 
-app.use(errorHandler);
 
 start();
