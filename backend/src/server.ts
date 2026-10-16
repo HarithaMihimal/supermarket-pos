@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { pool, testDatabaseConnection } from './config/database';
 
 import productRoutes from './routes/productRoutes';
+import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
 
@@ -49,5 +50,7 @@ async function start() {
     process.exit(1);
   }
 }
+
+app.use(errorHandler);
 
 start();
