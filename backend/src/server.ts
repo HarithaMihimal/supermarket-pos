@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { pool, testDatabaseConnection } from './config/database';
 
 import productRoutes from './routes/productRoutes';
+import saleRoutes from './routes/saleRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -13,7 +14,6 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
-app.use(errorHandler);
 app.use(helmet());
 app.use(cors({
   origin: process.env.FRONTEND_URL,
@@ -38,6 +38,9 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.use('/api/products', productRoutes);
+app.use('/api/sales', saleRoutes);
+
+app.use(errorHandler);
 
 async function start() {
   try {
