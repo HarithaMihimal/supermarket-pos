@@ -1,6 +1,40 @@
 import { pool } from '../config/database';
 import { ProductInput } from '../schemas/productSchema';
 
+export async function listProducts(search?: string, categoryId?: number) {
+  const values: (string | number)[] = [];
+  const filters = ['p.active = TRUE'];
+
+  if (search) {
+    values.push(`%${search}%`);
+    filters.push(`(p.name ILIKE $${values.length} OR p.barcode ILIKE $${values.length})`);
+  }
+
+  if (categoryId) {
+    values.push(categoryId);
+    filters.push(`p.category_id = $${values.length}`);
+  }
+
+  const result = await pool.query(`
+    SELECT p.product_id, p.name, p.barcode, p.selling_price,
+           c.category_id, c.name AS category, COALESCE(i.quantity, 0) AS quantity
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.category_id
+    LEFT JOIN inventory i ON p.product_id = i.product_id AND i.branch_id = 1
+    WHERE ${filters.join(' AND ')}
+    ORDER BY p.name
+  `, values);
+
+  return result.rows;
+}
+
+export async function listCategories() {
+  const result = await pool.query(
+    'SELECT category_id, name FROM categories ORDER BY name'
+  );
+  return result.rows;
+}
+
 export async function createProduct(data: ProductInput) {
   const query = `
     INSERT INTO products
