@@ -72,5 +72,3 @@ CREATE INDEX idx_products_name ON products(name);
 CREATE INDEX idx_sales_branch_date ON sales(branch_id, created_at);
 CREATE INDEX idx_sale_items_product ON sale_items(product_id);
 
-
-
