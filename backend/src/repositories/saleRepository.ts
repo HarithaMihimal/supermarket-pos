@@ -64,6 +64,12 @@ export async function createSale(data: SaleInput) {
          WHERE branch_id = $2 AND product_id = $3`,
         [item.quantity, data.branch_id, item.product_id],
       );
+      await client.query(
+        `INSERT INTO inventory_movements
+           (branch_id, product_id, quantity_delta, reason, note)
+         VALUES ($1, $2, $3, 'sale', $4)`,
+        [data.branch_id, item.product_id, -item.quantity, `Sale ${sale.rows[0].sale_id}`],
+      );
     }
 
     await client.query(

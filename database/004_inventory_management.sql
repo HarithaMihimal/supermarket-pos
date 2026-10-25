@@ -7,7 +7,7 @@ CREATE TABLE inventory_movements (
     product_id BIGINT NOT NULL REFERENCES products(product_id),
     quantity_delta NUMERIC(12,3) NOT NULL CHECK (quantity_delta <> 0),
     reason VARCHAR(30) NOT NULL
-        CHECK (reason IN ('receipt', 'adjustment', 'damage', 'opening_balance')),
+        CHECK (reason IN ('receipt', 'adjustment', 'damage', 'sale', 'opening_balance')),
     note VARCHAR(500),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
