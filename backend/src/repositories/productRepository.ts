@@ -36,25 +36,31 @@ export async function listCategories() {
 }
 
 export async function createProduct(data: ProductInput) {
-  const query = `
-    INSERT INTO products
-      (name, barcode, category_id,
-       cost_price, selling_price, active)
-    VALUES ($1, $2, $3, $4, $5, $6)
-    RETURNING *;
-  `;
-
-  const values = [
-    data.name,
-    data.barcode,
-    data.category_id,
-    data.cost_price,
-    data.selling_price,
-    data.active,
-  ];
-
-  const result = await pool.query(query, values);
-  return result.rows[0];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(`
+      INSERT INTO products
+        (name, barcode, category_id, cost_price, selling_price, active)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *;
+    `, [
+      data.name, data.barcode, data.category_id, data.cost_price,
+      data.selling_price, data.active,
+    ]);
+    await client.query(
+      `INSERT INTO inventory (branch_id, product_id, quantity)
+       VALUES (1, $1, 0)`,
+      [result.rows[0].product_id],
+    );
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateProduct(

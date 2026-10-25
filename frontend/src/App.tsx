@@ -9,6 +9,7 @@ import {
   Minus,
   Package,
   Plus,
+  RefreshCw,
   Receipt,
   Search,
   ShoppingCart,
@@ -29,7 +30,18 @@ type Product = {
 };
 
 type CartItem = Product & { cartQuantity: number };
+type InventoryItem = {
+  inventory_id: number;
+  product_id: number;
+  name: string;
+  barcode: string;
+  category: string | null;
+  quantity: string;
+  reorder_level: string;
+  low_stock: boolean;
+};
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
+type View = 'checkout' | 'inventory';
 
 const money = (value: number) => `LKR ${value.toLocaleString('en-LK', {
   minimumFractionDigits: 2,
@@ -44,22 +56,56 @@ function App() {
   const [category, setCategory] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [amountPaid, setAmountPaid] = useState('');
+  const [view, setView] = useState<View>('checkout');
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [adjustingProductId, setAdjustingProductId] = useState<number | null>(null);
+  const [adjustment, setAdjustment] = useState('1');
+  const [adjustmentReason, setAdjustmentReason] = useState<'receipt' | 'adjustment' | 'damage'>('receipt');
+  const [adjustmentNote, setAdjustmentNote] = useState('');
+  const [inventoryLoading, setInventoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState(false);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
-  useEffect(() => {
-    Promise.all([
+  async function refreshCatalog() {
+    const [productResponse, categoryResponse] = await Promise.all([
       api.get<{ data: Product[] }>('/products'),
       api.get<{ data: { category_id: number; name: string }[] }>('/products/categories'),
-    ])
-      .then(([productResponse, categoryResponse]) => {
-        setProducts(productResponse.data.data);
-        setCategories(categoryResponse.data.data);
-      })
+    ]);
+    setProducts(productResponse.data.data);
+    setCategories(categoryResponse.data.data);
+  }
+
+  async function refreshInventory() {
+    setInventoryLoading(true);
+    try {
+      const response = await api.get<{ data: InventoryItem[] }>('/inventory', {
+        params: { search: inventorySearch || undefined, low_stock: lowStockOnly },
+      });
+      setInventory(response.data.data);
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load inventory.' });
+    } finally {
+      setInventoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // The initial request synchronizes the client with the API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshCatalog()
       .catch(() => setNotice({ type: 'error', text: 'Could not connect to the POS server.' }))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    // Inventory filters are persisted by fetching the matching server view.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (view === 'inventory') void refreshInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, inventorySearch, lowStockOnly]);
 
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase().trim();
@@ -113,11 +159,38 @@ function App() {
       });
       setCart([]);
       setAmountPaid('');
+      await refreshCatalog();
+      if (view === 'inventory') await refreshInventory();
     } catch (error) {
       const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
       setNotice({ type: 'error', text: message ?? 'Checkout failed. Please try again.' });
     } finally {
       setCheckingOut(false);
+    }
+
+  }
+
+  async function submitAdjustment(productId: number) {
+    const quantityDelta = Number(adjustment);
+    if (!Number.isFinite(quantityDelta) || quantityDelta === 0) {
+      setNotice({ type: 'error', text: 'Enter a non-zero quantity adjustment.' });
+      return;
+    }
+
+    try {
+      await api.post('/inventory/adjustments', {
+        product_id: productId,
+        quantity_delta: quantityDelta,
+        reason: adjustmentReason,
+        note: adjustmentNote.trim() || undefined,
+      });
+      setNotice({ type: 'success', text: 'Inventory updated successfully.' });
+      setAdjustingProductId(null);
+      setAdjustmentNote('');
+      await Promise.all([refreshInventory(), refreshCatalog()]);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Inventory update failed.' });
     }
   }
 
@@ -132,18 +205,18 @@ function App() {
       <div className="layout">
         <aside className="sidebar">
           <nav>
-            <div className="nav-item active"><LayoutDashboard size={18} /> Checkout</div>
-            <div className="nav-item"><Package size={18} /> Inventory</div>
+            <button className={`nav-item ${view === 'checkout' ? 'active' : ''}`} onClick={() => setView('checkout')}><LayoutDashboard size={18} /> Checkout</button>
+            <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
             <div className="nav-item"><Receipt size={18} /> Sales history</div>
           </nav>
           <div className="sidebar-footer">v1.0.0 <span>●</span> System online</div>
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">POINT OF SALE</p><h1>New transaction</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'checkout' ? 'POINT OF SALE' : 'STOCK CONTROL'}</p><h1>{view === 'checkout' ? 'New transaction' : 'Inventory'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
-          <section className="catalog-panel panel">
+          {view === 'checkout' ? <section className="catalog-panel panel">
             <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><span className="product-count">{filteredProducts.length} products</span></div>
             <div className="catalog-controls">
               <div className="search-box"><Search size={18} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name or scan barcode..." /><Barcode size={18} className="muted-icon" /></div>
@@ -159,7 +232,28 @@ function App() {
                 </button>;
               })}
             </div>
-          </section>
+          </section> : <section className="catalog-panel panel inventory-panel">
+            <div className="panel-heading"><div><h2>Stock levels</h2><p>Review availability and record stock movements</p></div><button className="icon-button" onClick={() => void refreshInventory()} aria-label="Refresh inventory"><RefreshCw size={16} /></button></div>
+            <div className="catalog-controls">
+              <div className="search-box"><Search size={18} /><input value={inventorySearch} onChange={event => setInventorySearch(event.target.value)} placeholder="Search inventory..." /></div>
+              <label className="stock-filter"><input type="checkbox" checked={lowStockOnly} onChange={event => setLowStockOnly(event.target.checked)} /> Low stock</label>
+            </div>
+            <div className="inventory-list">
+              {inventoryLoading && <div className="empty-state">Loading inventory...</div>}
+              {!inventoryLoading && !inventory.length && <div className="empty-state">No inventory items match your search.</div>}
+              {inventory.map(item => <div className="inventory-row" key={item.inventory_id}>
+                <div><strong>{item.name}</strong><span>{item.category ?? 'General'} · {item.barcode}</span></div>
+                <div className={item.low_stock ? 'stock-value low' : 'stock-value'}><strong>{item.quantity}</strong><span>reorder at {item.reorder_level}</span></div>
+                {adjustingProductId === item.product_id ? <div className="adjustment-form">
+                  <input type="number" step="0.001" value={adjustment} onChange={event => setAdjustment(event.target.value)} aria-label="Quantity adjustment" />
+                  <select value={adjustmentReason} onChange={event => setAdjustmentReason(event.target.value as typeof adjustmentReason)} aria-label="Adjustment reason"><option value="receipt">Receipt</option><option value="adjustment">Correction</option><option value="damage">Damage</option></select>
+                  <input value={adjustmentNote} onChange={event => setAdjustmentNote(event.target.value)} placeholder="Note (optional)" aria-label="Adjustment note" />
+                  <button className="small-button" onClick={() => void submitAdjustment(item.product_id)}>Save</button>
+                  <button className="text-button" onClick={() => setAdjustingProductId(null)}>Cancel</button>
+                </div> : <button className="small-button" onClick={() => { setAdjustingProductId(item.product_id); setAdjustment('1'); }}>Adjust stock</button>}
+              </div>)}
+            </div>
+          </section>}
         </main>
 
         <aside className="checkout-panel">
