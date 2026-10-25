@@ -1,5 +1,6 @@
 import { pool } from '../config/database';
 import { SaleInput } from '../schemas/saleSchema';
+import { SalesHistoryQuery } from '../schemas/salesHistorySchema';
 import { AppError } from '../utils/AppError';
 
 export async function createSale(data: SaleInput) {
@@ -14,6 +15,7 @@ export async function createSale(data: SaleInput) {
         (requestedQuantities.get(item.product_id) ?? 0) + item.quantity,
       );
     }
+
     const productIds = [...requestedQuantities.keys()];
     const products = await client.query(
       `SELECT p.product_id, p.name, p.selling_price, i.quantity
@@ -95,4 +97,44 @@ export async function createSale(data: SaleInput) {
   } finally {
     client.release();
   }
+}
+
+export async function listSales(query: SalesHistoryQuery) {
+  const values: (string | number)[] = [query.branch_id];
+  const filters = ['s.branch_id = $1'];
+
+  if (query.search) {
+    values.push(`%${query.search}%`);
+    filters.push(`(CAST(s.sale_id AS TEXT) ILIKE $${values.length} OR u.full_name ILIKE $${values.length})`);
+  }
+  if (query.payment_method !== 'all') {
+    values.push(query.payment_method);
+    filters.push(`p.payment_method = $${values.length}`);
+  }
+  if (query.from) {
+    values.push(query.from);
+    filters.push(`s.created_at >= $${values.length}::date`);
+  }
+  if (query.to) {
+    values.push(query.to);
+    filters.push(`s.created_at < ($${values.length}::date + INTERVAL '1 day')`);
+  }
+
+  values.push(query.limit);
+  const result = await pool.query(`
+    SELECT s.sale_id, s.total_amount, s.status, s.created_at,
+           u.full_name AS cashier,
+           p.amount AS amount_paid, p.change_amount, p.payment_method,
+           COUNT(si.sale_item_id)::int AS item_count
+    FROM sales s
+    JOIN users u ON u.user_id = s.cashier_id
+    JOIN payments p ON p.sale_id = s.sale_id
+    LEFT JOIN sale_items si ON si.sale_id = s.sale_id
+    WHERE ${filters.join(' AND ')}
+    GROUP BY s.sale_id, u.full_name, p.payment_id
+    ORDER BY s.created_at DESC
+    LIMIT $${values.length}
+  `, values);
+
+  return result.rows;
 }

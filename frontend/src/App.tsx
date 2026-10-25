@@ -41,7 +41,18 @@ type InventoryItem = {
   low_stock: boolean;
 };
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
-type View = 'checkout' | 'inventory';
+type SaleRecord = {
+  sale_id: number;
+  total_amount: string;
+  status: string;
+  created_at: string;
+  cashier: string;
+  amount_paid: string;
+  change_amount: string;
+  payment_method: PaymentMethod;
+  item_count: number;
+};
+type View = 'checkout' | 'inventory' | 'sales';
 
 const parseAmount = (value: string) => {
   const normalized = value.trim();
@@ -67,6 +78,10 @@ function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
+  const [salesSearch, setSalesSearch] = useState('');
+  const [salesPaymentMethod, setSalesPaymentMethod] = useState<'all' | PaymentMethod>('all');
+  const [salesLoading, setSalesLoading] = useState(false);
   const [adjustingProductId, setAdjustingProductId] = useState<number | null>(null);
   const [adjustment, setAdjustment] = useState('1');
   const [adjustmentReason, setAdjustmentReason] = useState<'receipt' | 'adjustment' | 'damage'>('receipt');
@@ -99,6 +114,23 @@ function App() {
     }
   }
 
+  async function refreshSales() {
+      setSalesLoading(true);
+      try {
+        const response = await api.get<{ data: SaleRecord[] }>('/sales', {
+          params: {
+            search: salesSearch || undefined,
+            payment_method: salesPaymentMethod,
+          },
+        });
+        setSales(response.data.data);
+      } catch {
+        setNotice({ type: 'error', text: 'Could not load sales history.' });
+      } finally {
+        setSalesLoading(false);
+    }
+  }
+
   useEffect(() => {
     // The initial request synchronizes the client with the API.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -113,6 +145,13 @@ function App() {
     if (view === 'inventory') void refreshInventory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, inventorySearch, lowStockOnly]);
+
+  useEffect(() => {
+    // Sales filters are synchronized with the server query.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (view === 'sales') void refreshSales();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, salesSearch, salesPaymentMethod]);
 
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase().trim();
@@ -232,13 +271,13 @@ function App() {
           <nav>
             <button className={`nav-item ${view === 'checkout' ? 'active' : ''}`} onClick={() => setView('checkout')}><LayoutDashboard size={18} /> Checkout</button>
             <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
-            <div className="nav-item"><Receipt size={18} /> Sales history</div>
+            <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
           </nav>
           <div className="sidebar-footer">v1.0.0 <span>●</span> System online</div>
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">{view === 'checkout' ? 'POINT OF SALE' : 'STOCK CONTROL'}</p><h1>{view === 'checkout' ? 'New transaction' : 'Inventory'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : 'REPORTING'}</p><h1>{view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
           {view === 'checkout' ? <section className="catalog-panel panel">
@@ -257,7 +296,7 @@ function App() {
                 </button>;
               })}
             </div>
-          </section> : <section className="catalog-panel panel inventory-panel">
+          </section> : view === 'inventory' ? <section className="catalog-panel panel inventory-panel">
             <div className="panel-heading"><div><h2>Stock levels</h2><p>Review availability and record stock movements</p></div><button className="icon-button" onClick={() => void refreshInventory()} aria-label="Refresh inventory"><RefreshCw size={16} /></button></div>
             <div className="catalog-controls">
               <div className="search-box"><Search size={18} /><input value={inventorySearch} onChange={event => setInventorySearch(event.target.value)} placeholder="Search inventory..." /></div>
@@ -276,6 +315,22 @@ function App() {
                   <button className="small-button" onClick={() => void submitAdjustment(item.product_id)}>Save</button>
                   <button className="text-button" onClick={() => setAdjustingProductId(null)}>Cancel</button>
                 </div> : <button className="small-button" onClick={() => { setAdjustingProductId(item.product_id); setAdjustment('1'); }}>Adjust stock</button>}
+              </div>)}
+            </div>
+          </section> : <section className="catalog-panel panel sales-panel">
+            <div className="panel-heading"><div><h2>Completed transactions</h2><p>Review cash payments and daily sales activity</p></div><button className="icon-button" onClick={() => void refreshSales()} aria-label="Refresh sales history"><RefreshCw size={16} /></button></div>
+            <div className="catalog-controls">
+              <div className="search-box"><Search size={18} /><input value={salesSearch} onChange={event => setSalesSearch(event.target.value)} placeholder="Search sale number or cashier..." /></div>
+              <select value={salesPaymentMethod} onChange={event => setSalesPaymentMethod(event.target.value as typeof salesPaymentMethod)}><option value="all">All payments</option><option value="cash">Cash</option><option value="card">Card</option><option value="bank_transfer">Transfer</option></select>
+            </div>
+            <div className="sales-list">
+              {salesLoading && <div className="empty-state">Loading sales history...</div>}
+              {!salesLoading && !sales.length && <div className="empty-state">No completed sales found.</div>}
+              {sales.map(sale => <div className="sale-row" key={sale.sale_id}>
+                <div><strong>Sale #{sale.sale_id}</strong><span>{new Date(sale.created_at).toLocaleString('en-LK')} · {sale.cashier}</span></div>
+                <div><strong>{money(Number(sale.total_amount))}</strong><span>{sale.item_count} item{sale.item_count === 1 ? '' : 's'}</span></div>
+                <div><span className="payment-badge">{sale.payment_method === 'bank_transfer' ? 'Transfer' : sale.payment_method[0].toUpperCase() + sale.payment_method.slice(1)}</span><span className="sale-status">{sale.status}</span></div>
+                <div className="sale-paid"><strong>Paid {money(Number(sale.amount_paid))}</strong><span>Change {money(Number(sale.change_amount))}</span></div>
               </div>)}
             </div>
           </section>}
