@@ -73,9 +73,14 @@ export async function createSale(data: SaleInput) {
     }
 
     await client.query(
-      `INSERT INTO payments (sale_id, amount, payment_method)
-       VALUES ($1, $2, $3)`,
-      [sale.rows[0].sale_id, data.amount_paid, data.payment_method],
+      `INSERT INTO payments (sale_id, amount, payment_method, change_amount)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        sale.rows[0].sale_id,
+        data.amount_paid,
+        data.payment_method,
+        Math.round((data.amount_paid - total) * 100) / 100,
+      ],
     );
     await client.query('COMMIT');
 

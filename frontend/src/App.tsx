@@ -43,6 +43,13 @@ type InventoryItem = {
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
 type View = 'checkout' | 'inventory';
 
+const parseAmount = (value: string) => {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{0,2})?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const money = (value: number) => `LKR ${value.toLocaleString('en-LK', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -144,14 +151,26 @@ function App() {
   }
 
   async function completeSale() {
-    if (!cart.length || Number(amountPaid) < total) return;
+    const parsedAmountPaid = parseAmount(amountPaid);
+    if (!cart.length || parsedAmountPaid === null) {
+      setNotice({ type: 'error', text: 'Enter a valid cash amount.' });
+      return;
+    }
+    if (parsedAmountPaid < total) {
+      setNotice({ type: 'error', text: 'Cash received must cover the sale total.' });
+      return;
+    }
+    if (paymentMethod !== 'cash') {
+      setNotice({ type: 'error', text: 'Card and bank transfer payments are coming soon. Select Cash.' });
+      return;
+    }
     setCheckingOut(true);
     setNotice(null);
     try {
       const response = await api.post<{ data: { sale_id: number; change: number } }>('/sales', {
-        items: cart.map(item => ({ product_id: item.product_id, quantity: item.cartQuantity })),
+        items: cart.map(item => ({ product_id: Number(item.product_id), quantity: item.cartQuantity })),
         payment_method: paymentMethod,
-        amount_paid: Number(amountPaid),
+        amount_paid: parsedAmountPaid,
       });
       setNotice({
         type: 'success',
@@ -162,7 +181,13 @@ function App() {
       await refreshCatalog();
       if (view === 'inventory') await refreshInventory();
     } catch (error) {
-      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      const responseData = (error as {
+        response?: { data?: { message?: string; errors?: { field: string; message: string }[] } };
+      }).response?.data;
+      const validationError = responseData?.errors?.[0];
+      const message = validationError
+        ? `${validationError.field || 'Payment'}: ${validationError.message}`
+        : responseData?.message;
       setNotice({ type: 'error', text: message ?? 'Checkout failed. Please try again.' });
     } finally {
       setCheckingOut(false);
@@ -264,8 +289,8 @@ function App() {
           </div>
           <div className="checkout-bottom">
             <div className="totals"><div><span>Subtotal</span><strong>{money(total)}</strong></div><div><span>Tax</span><strong>{money(0)}</strong></div><div className="grand-total"><span>Total</span><strong>{money(total)}</strong></div></div>
-            <div className="payment-section"><p className="section-label">Payment method</p><div className="payment-options">{(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map(method => <button className={paymentMethod === method ? 'selected' : ''} key={method} onClick={() => setPaymentMethod(method)}>{method === 'cash' ? <Banknote size={17} /> : method === 'card' ? <CreditCard size={17} /> : <WalletCards size={17} />}<span>{method === 'bank_transfer' ? 'Transfer' : method[0].toUpperCase() + method.slice(1)}</span></button>)}</div><label className="amount-label">Amount received<input type="text" inputMode="decimal" value={amountPaid} onChange={event => setAmountPaid(event.target.value)} placeholder="0.00" /></label>{Number(amountPaid) >= total && total > 0 && <div className="change-row"><span>Change</span><strong>{money(change)}</strong></div>}</div>
-            <button className="complete-button" onClick={completeSale} disabled={checkingOut || !cart.length || Number(amountPaid) < total}>{checkingOut ? 'Processing...' : `Complete sale · ${money(total)}`}</button>
+            <div className="payment-section"><p className="section-label">Payment method</p><div className="payment-options">{(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map(method => <button className={paymentMethod === method ? 'selected' : ''} key={method} onClick={() => setPaymentMethod(method)} disabled={method !== 'cash'}>{method === 'cash' ? <Banknote size={17} /> : method === 'card' ? <CreditCard size={17} /> : <WalletCards size={17} />}<span>{method === 'bank_transfer' ? 'Transfer' : method[0].toUpperCase() + method.slice(1)}</span></button>)}</div><label className="amount-label">Amount received<input type="text" inputMode="decimal" value={amountPaid} onChange={event => setAmountPaid(event.target.value)} placeholder="0.00" /></label>{(parseAmount(amountPaid) ?? 0) >= total && total > 0 && <div className="change-row"><span>Change</span><strong>{money(change)}</strong></div>}</div>
+            <button className="complete-button" onClick={completeSale} disabled={checkingOut || !cart.length || (parseAmount(amountPaid) ?? 0) < total}>{checkingOut ? 'Processing...' : `Complete cash sale · ${money(total)}`}</button>
             <div className="cashier-note"><UserRound size={14} /> Sale will be recorded under Demo Cashier</div>
           </div>
         </aside>
