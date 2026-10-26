@@ -131,7 +131,11 @@ function App() {
     setSettingsLoading(true);
     try {
       const response = await api.get<{ data: ShopSettings }>('/settings');
-      setShopSettings(response.data.data);
+      setShopSettings({
+        ...response.data.data,
+        branch_id: Number(response.data.data.branch_id),
+        default_reorder_level: Number(response.data.data.default_reorder_level),
+      });
     } catch {
       setNotice({ type: 'error', text: 'Could not load shop settings. Run the latest database migration.' });
     } finally {
@@ -144,8 +148,21 @@ function App() {
     if (!shopSettings) return;
     setSettingsSaving(true);
     try {
-      const response = await api.put<{ data: ShopSettings }>('/settings', shopSettings);
-      setShopSettings(response.data.data);
+      const response = await api.put<{ data: ShopSettings }>('/settings', {
+        name: shopSettings.name,
+        address: shopSettings.address,
+        phone: shopSettings.phone,
+        email: shopSettings.email,
+        tax_id: shopSettings.tax_id,
+        currency: shopSettings.currency,
+        receipt_footer: shopSettings.receipt_footer,
+        default_reorder_level: Number(shopSettings.default_reorder_level),
+      });
+      setShopSettings({
+        ...response.data.data,
+        branch_id: Number(response.data.data.branch_id),
+        default_reorder_level: Number(response.data.data.default_reorder_level),
+      });
       setSettingsOpen(false);
       setNotice({ type: 'success', text: 'Shop settings saved successfully.' });
     } catch (error) {
