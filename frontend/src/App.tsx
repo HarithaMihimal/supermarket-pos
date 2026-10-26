@@ -96,8 +96,17 @@ function App() {
       api.get<{ data: Product[] }>('/products'),
       api.get<{ data: { category_id: number; name: string }[] }>('/products/categories'),
     ]);
-    setProducts(productResponse.data.data);
-    setCategories(categoryResponse.data.data);
+    setProducts(productResponse.data.data.map(product => ({
+      ...product,
+      product_id: Number(product.product_id),
+      category_id: product.category_id === null ? null : Number(product.category_id),
+      quantity: String(product.quantity),
+      selling_price: String(product.selling_price),
+    })));
+    setCategories(categoryResponse.data.data.map(item => ({
+      ...item,
+      category_id: Number(item.category_id),
+    })));
   }
 
   async function refreshInventory() {
@@ -159,7 +168,7 @@ function App() {
       const matchesSearch = !term
         || product.name.toLowerCase().includes(term)
         || product.barcode.includes(term);
-      const matchesCategory = category === 'all' || product.category_id === Number(category);
+      const matchesCategory = category === 'all' || Number(product.category_id) === Number(category);
       return matchesSearch && matchesCategory;
     });
   }, [products, search, category]);
