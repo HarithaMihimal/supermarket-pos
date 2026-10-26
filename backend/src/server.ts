@@ -8,6 +8,7 @@ import { pool, testDatabaseConnection } from './config/database';
 import productRoutes from './routes/productRoutes';
 import saleRoutes from './routes/saleRoutes';
 import inventoryRoutes from './routes/inventoryRoutes';
+import settingsRoutes from './routes/settingsRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -41,6 +42,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.use(errorHandler);
 

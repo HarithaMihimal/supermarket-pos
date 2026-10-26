@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from './services/api';
 import {
   Banknote,
@@ -12,10 +12,12 @@ import {
   RefreshCw,
   Receipt,
   Search,
+  Settings,
   ShoppingCart,
   Trash2,
   UserRound,
   WalletCards,
+  X,
 } from 'lucide-react';
 import './App.css';
 
@@ -53,6 +55,17 @@ type SaleRecord = {
   item_count: number;
 };
 type View = 'checkout' | 'inventory' | 'sales';
+type ShopSettings = {
+  branch_id: number;
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  tax_id: string;
+  currency: string;
+  receipt_footer: string;
+  default_reorder_level: number;
+};
 
 const parseAmount = (value: string) => {
   const normalized = value.trim();
@@ -90,6 +103,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState(false);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
 
   async function refreshCatalog() {
     const [productResponse, categoryResponse] = await Promise.all([
@@ -107,6 +124,42 @@ function App() {
       ...item,
       category_id: Number(item.category_id),
     })));
+  }
+
+  async function openSettings() {
+    setSettingsOpen(true);
+    setSettingsLoading(true);
+    try {
+      const response = await api.get<{ data: ShopSettings }>('/settings');
+      setShopSettings(response.data.data);
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load shop settings. Run the latest database migration.' });
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!shopSettings) return;
+    setSettingsSaving(true);
+    try {
+      const response = await api.put<{ data: ShopSettings }>('/settings', shopSettings);
+      setShopSettings(response.data.data);
+      setSettingsOpen(false);
+      setNotice({ type: 'success', text: 'Shop settings saved successfully.' });
+    } catch (error) {
+      const responseData = (error as {
+        response?: { data?: { message?: string; errors?: { field: string; message: string }[] } };
+      }).response?.data;
+      const validationError = responseData?.errors?.[0];
+      setNotice({
+        type: 'error',
+        text: validationError ? `${validationError.field}: ${validationError.message}` : responseData?.message ?? 'Could not save shop settings.',
+      });
+    } finally {
+      setSettingsSaving(false);
+    }
   }
 
   async function refreshInventory() {
@@ -271,8 +324,8 @@ function App() {
     <div className="pos-app">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><ShoppingCart size={20} /></div><span>Market<span className="brand-accent">Flow</span></span></div>
-        <div className="store-status"><span className="status-dot" /> Main Branch <span className="status-divider" /> Register 01</div>
-        <div className="user-menu"><div className="avatar">DC</div><span>Demo Cashier</span></div>
+        <div className="store-status"><span className="status-dot" /> {shopSettings?.name ?? 'Main Branch'} <span className="status-divider" /> Register 01</div>
+        <div className="user-menu"><button className="settings-trigger" onClick={() => void openSettings()} aria-label="Open shop settings"><Settings size={17} /></button><div className="avatar">DC</div><span>Demo Cashier</span></div>
       </header>
 
       <div className="layout">
@@ -359,6 +412,27 @@ function App() {
           </div>
         </aside>
       </div>
+      {settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+        <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <div className="settings-dialog-header"><div><p className="eyebrow">CONFIGURATION</p><h2 id="settings-title">Shop settings</h2><p>Update the details shown on receipts and across the POS.</p></div><button className="settings-close" onClick={() => setSettingsOpen(false)} aria-label="Close settings"><X size={18} /></button></div>
+          {settingsLoading && <div className="settings-loading">Loading settings...</div>}
+          {!settingsLoading && shopSettings && <form className="settings-form" onSubmit={event => void saveSettings(event)}>
+            <div className="settings-section"><h3>Business details</h3><div className="settings-grid">
+              <label>Shop name<input value={shopSettings.name} onChange={event => setShopSettings({ ...shopSettings, name: event.target.value })} required /></label>
+              <label>Phone<input value={shopSettings.phone} onChange={event => setShopSettings({ ...shopSettings, phone: event.target.value })} /></label>
+              <label>Email<input type="email" value={shopSettings.email} onChange={event => setShopSettings({ ...shopSettings, email: event.target.value })} /></label>
+              <label>Tax ID<input value={shopSettings.tax_id} onChange={event => setShopSettings({ ...shopSettings, tax_id: event.target.value })} /></label>
+              <label className="settings-wide">Address<textarea value={shopSettings.address} onChange={event => setShopSettings({ ...shopSettings, address: event.target.value })} rows={2} /></label>
+            </div></div>
+            <div className="settings-section"><h3>POS preferences</h3><div className="settings-grid">
+              <label>Currency code<input value={shopSettings.currency} onChange={event => setShopSettings({ ...shopSettings, currency: event.target.value.toUpperCase() })} maxLength={10} required /></label>
+              <label>Default reorder level<input type="number" min="0" step="0.001" value={shopSettings.default_reorder_level} onChange={event => setShopSettings({ ...shopSettings, default_reorder_level: Number(event.target.value) })} required /></label>
+              <label className="settings-wide">Receipt footer<textarea value={shopSettings.receipt_footer} onChange={event => setShopSettings({ ...shopSettings, receipt_footer: event.target.value })} rows={2} /></label>
+            </div></div>
+            <div className="settings-actions"><button type="button" className="text-button" onClick={() => setSettingsOpen(false)}>Cancel</button><button type="submit" className="small-button" disabled={settingsSaving}>{settingsSaving ? 'Saving...' : 'Save changes'}</button></div>
+          </form>}
+        </section>
+      </div>}
     </div>
   );
 }
