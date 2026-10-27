@@ -56,6 +56,21 @@ type SaleRecord = {
   item_count: number;
   payment_reference?: string | null;
 };
+type SaleDetail = SaleRecord & {
+  branch_id: number;
+  cashier_email: string;
+  payment_id: number;
+  paid_at: string;
+  items: {
+    sale_item_id: number;
+    product_id: number;
+    name: string;
+    barcode: string;
+    quantity: string;
+    unit_price: string;
+    subtotal: string;
+  }[];
+};
 type View = 'checkout' | 'inventory' | 'sales';
 type ShopSettings = {
   branch_id: number;
@@ -110,6 +125,9 @@ function App() {
   const [salesSearch, setSalesSearch] = useState('');
   const [salesPaymentMethod, setSalesPaymentMethod] = useState<'all' | PaymentMethod>('all');
   const [salesLoading, setSalesLoading] = useState(false);
+  const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null);
+  const [saleDetails, setSaleDetails] = useState<Record<number, SaleDetail>>({});
+  const [saleDetailLoading, setSaleDetailLoading] = useState<number | null>(null);
   const [adjustingProductId, setAdjustingProductId] = useState<number | null>(null);
   const [adjustment, setAdjustment] = useState('1');
   const [adjustmentReason, setAdjustmentReason] = useState<'receipt' | 'adjustment' | 'damage'>('receipt');
@@ -312,14 +330,43 @@ function App() {
   const itemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
   const change = Math.max(0, Number(amountPaid || 0) - total);
 
-  function printReceipt(saleId: number, items: CartItem[], paid: number, method: PaymentMethod) {
+  async function toggleSaleDetails(saleId: number) {
+    if (expandedSaleId === saleId) {
+      setExpandedSaleId(null);
+      return;
+    }
+    setExpandedSaleId(saleId);
+    if (saleDetails[saleId]) return;
+    setSaleDetailLoading(saleId);
+    try {
+      const response = await api.get<{ data: SaleDetail }>(`/sales/${saleId}`);
+      setSaleDetails(current => ({ ...current, [saleId]: response.data.data }));
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not load sale details.' });
+      setExpandedSaleId(null);
+    } finally {
+      setSaleDetailLoading(null);
+    }
+  }
+
+  function printReceipt(
+    saleId: number,
+    items: { name: string; quantity: number | string; unit_price: number | string; subtotal?: number | string }[],
+    paid: number,
+    method: PaymentMethod,
+    saleTotal: number,
+    reference?: string | null,
+    cashierName = user?.fullName ?? 'Cashier',
+    createdAt = new Date().toISOString(),
+  ) {
     const receiptWindow = window.open('', '_blank', 'width=420,height=700');
     if (!receiptWindow) {
       setNotice({ type: 'error', text: 'Allow pop-ups to print the receipt.' });
       return;
     }
-    const lines = items.map(item => `<tr><td>${item.name}</td><td>${item.cartQuantity} x ${money(Number(item.selling_price))}</td><td>${money(Number(item.selling_price) * item.cartQuantity)}</td></tr>`).join('');
-    receiptWindow.document.write(`<html><head><title>Receipt #${saleId}</title><style>body{font-family:Arial,sans-serif;width:320px;margin:20px auto;color:#111}h1{text-align:center;font-size:20px}p{text-align:center;font-size:12px}table{width:100%;font-size:11px;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #ddd}td:last-child{text-align:right}.total{font-weight:bold;font-size:14px}</style></head><body><h1>${shopSettings?.name ?? 'Supermarket POS'}</h1><p>Receipt #${saleId}<br>${new Date().toLocaleString('en-LK')}<br>Cashier: ${user?.fullName ?? 'Cashier'}</p><table>${lines}</table><p class="total">Total: ${money(total)}<br>Paid: ${money(paid)}<br>Method: ${method}<br>Change: ${money(Math.max(0, paid - total))}</p><p>${shopSettings?.receipt_footer ?? 'Thank you for shopping with us!'}</p></body></html>`);
+    const lines = items.map(item => `<tr><td>${item.name}</td><td>${item.quantity} x ${money(Number(item.unit_price))}</td><td>${money(Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)))}</td></tr>`).join('');
+    receiptWindow.document.write(`<html><head><title>Receipt #${saleId}</title><style>body{font-family:Arial,sans-serif;width:320px;margin:20px auto;color:#111}h1{text-align:center;font-size:20px}p{text-align:center;font-size:12px}table{width:100%;font-size:11px;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #ddd}td:last-child{text-align:right}.total{font-weight:bold;font-size:14px}.meta{text-align:left}</style></head><body><h1>${shopSettings?.name ?? 'Supermarket POS'}</h1><p>Receipt #${saleId}<br>${new Date(createdAt).toLocaleString('en-LK')}<br>Cashier: ${cashierName}</p><table>${lines}</table><p class="total">Total: ${money(saleTotal)}<br>Paid: ${money(paid)}<br>Method: ${method}<br>${reference ? `Reference: ${reference}<br>` : ''}Change: ${money(Math.max(0, paid - saleTotal))}</p><p>${shopSettings?.receipt_footer ?? 'Thank you for shopping with us!'}</p></body></html>`);
     receiptWindow.document.close();
     receiptWindow.focus();
     receiptWindow.print();
@@ -374,7 +421,11 @@ function App() {
         type: 'success',
         text: `Sale #${response.data.data.sale_id} completed. Change: ${money(response.data.data.change)}`,
       });
-      printReceipt(response.data.data.sale_id, completedItems, parsedAmountPaid, paymentMethod);
+      printReceipt(response.data.data.sale_id, completedItems.map(item => ({
+        name: item.name,
+        quantity: item.cartQuantity,
+        unit_price: item.selling_price,
+      })), parsedAmountPaid, paymentMethod, total, paymentReference);
       setCart([]);
       setAmountPaid('');
       setPaymentReference('');
@@ -489,12 +540,26 @@ function App() {
             <div className="sales-list">
               {salesLoading && <div className="empty-state">Loading sales history...</div>}
               {!salesLoading && !sales.length && <div className="empty-state">No completed sales found.</div>}
-              {sales.map(sale => <div className="sale-row" key={sale.sale_id}>
-                <div><strong>Sale #{sale.sale_id}</strong><span>{new Date(sale.created_at).toLocaleString('en-LK')} · {sale.cashier}</span></div>
-                <div><strong>{money(Number(sale.total_amount))}</strong><span>{sale.item_count} item{sale.item_count === 1 ? '' : 's'}</span></div>
-                <div><span className="payment-badge">{sale.payment_method === 'bank_transfer' ? 'Transfer' : sale.payment_method[0].toUpperCase() + sale.payment_method.slice(1)}</span><span className="sale-status">{sale.status}</span></div>
-                <div className="sale-paid"><strong>Paid {money(Number(sale.amount_paid))}</strong><span>Change {money(Number(sale.change_amount))}</span></div>
-              </div>)}
+              {sales.map(sale => {
+                const detail = saleDetails[sale.sale_id];
+                const expanded = expandedSaleId === sale.sale_id;
+                return <div className={`sale-entry ${expanded ? 'expanded' : ''}`} key={sale.sale_id}>
+                  <button className="sale-row" onClick={() => void toggleSaleDetails(sale.sale_id)} aria-expanded={expanded}>
+                    <div><strong>Sale #{sale.sale_id}</strong><span>{new Date(sale.created_at).toLocaleString('en-LK')} · {sale.cashier}</span></div>
+                    <div><strong>{money(Number(sale.total_amount))}</strong><span>{sale.item_count} item{sale.item_count === 1 ? '' : 's'}</span></div>
+                    <div><span className="payment-badge">{sale.payment_method === 'bank_transfer' ? 'Transfer' : sale.payment_method[0].toUpperCase() + sale.payment_method.slice(1)}</span><span className="sale-status">{sale.status}</span></div>
+                    <div className="sale-paid"><strong>Paid {money(Number(sale.amount_paid))}</strong><span>Change {money(Number(sale.change_amount))}</span><span className="sale-expand">{expanded ? 'Hide details' : 'View details'} {expanded ? '▲' : '▼'}</span></div>
+                  </button>
+                  {expanded && <div className="sale-details">
+                    {saleDetailLoading === sale.sale_id && <div className="detail-loading">Loading transaction details...</div>}
+                    {detail && <><div className="detail-header"><div><strong>Transaction details</strong><span>Payment completed {new Date(detail.paid_at).toLocaleString('en-LK')}</span></div><button className="small-button" onClick={() => printReceipt(detail.sale_id, detail.items, Number(detail.amount_paid), detail.payment_method, Number(detail.total_amount), detail.payment_reference, detail.cashier, detail.created_at)}>Print receipt</button></div>
+                      <div className="detail-grid"><div><span>Cashier</span><strong>{detail.cashier}</strong><small>{detail.cashier_email}</small></div><div><span>Payment method</span><strong>{detail.payment_method === 'bank_transfer' ? 'Bank transfer' : detail.payment_method[0].toUpperCase() + detail.payment_method.slice(1)}</strong><small>{detail.payment_reference ? `Reference: ${detail.payment_reference}` : 'No reference recorded'}</small></div><div><span>Payment breakdown</span><strong>Paid {money(Number(detail.amount_paid))}</strong><small>Change {money(Number(detail.change_amount))}</small></div></div>
+                      <div className="detail-items"><div className="detail-item-row detail-item-head"><span>Item</span><span>Qty</span><span>Unit price</span><span>Subtotal</span></div>{detail.items.map(item => <div className="detail-item-row" key={item.sale_item_id}><div><strong>{item.name}</strong><small>Barcode: {item.barcode}</small></div><span>{item.quantity}</span><span>{money(Number(item.unit_price))}</span><strong>{money(Number(item.subtotal))}</strong></div>)}</div>
+                      <div className="detail-total"><span>Sale total</span><strong>{money(Number(detail.total_amount))}</strong></div>
+                    </>}
+                  </div>}
+                </div>;
+              })}
             </div>
           </section>}
         </main>

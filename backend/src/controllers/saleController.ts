@@ -3,6 +3,7 @@ import { saleSchema } from '../schemas/saleSchema';
 import { salesHistoryQuerySchema } from '../schemas/salesHistorySchema';
 import * as saleService from '../services/saleService';
 import { writeAudit } from '../utils/audit';
+import { productIdSchema } from '../schemas/productSchema';
 
 export async function createSale(req: Request, res: Response, next: NextFunction) {
   try {
@@ -26,6 +27,17 @@ export async function listSales(req: Request, res: Response, next: NextFunction)
   try {
     const query = salesHistoryQuerySchema.parse(req.query);
     res.json({ success: true, data: await saleService.listSales(query) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getSaleDetails(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user) throw new Error('Authenticated user context is missing');
+    const saleId = productIdSchema.parse(req.params.id);
+    const sale = await saleService.getSaleDetails(saleId, req.user.branchId);
+    res.json({ success: true, data: sale });
   } catch (error) {
     next(error);
   }

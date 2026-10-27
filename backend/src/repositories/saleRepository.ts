@@ -143,3 +143,33 @@ export async function listSales(query: SalesHistoryQuery) {
 
   return result.rows;
 }
+
+export async function getSaleDetails(saleId: number, branchId: number) {
+  const saleResult = await pool.query(`
+    SELECT s.sale_id, s.branch_id, s.total_amount, s.status, s.created_at,
+           u.full_name AS cashier, u.email AS cashier_email,
+           p.payment_id, p.amount AS amount_paid, p.change_amount,
+           p.payment_method, p.payment_reference, p.created_at AS paid_at
+    FROM sales s
+    JOIN users u ON u.user_id = s.cashier_id
+    JOIN payments p ON p.sale_id = s.sale_id
+    WHERE s.sale_id = $1 AND s.branch_id = $2
+  `, [saleId, branchId]);
+
+  if (!saleResult.rowCount) return null;
+
+  const itemsResult = await pool.query(`
+    SELECT si.sale_item_id, si.product_id, p.name, p.barcode,
+           si.quantity, si.unit_price, si.subtotal
+    FROM sale_items si
+    JOIN products p ON p.product_id = si.product_id
+    JOIN sales s ON s.sale_id = si.sale_id
+    WHERE si.sale_id = $1 AND s.branch_id = $2
+    ORDER BY si.sale_item_id
+  `, [saleId, branchId]);
+
+  return {
+    ...saleResult.rows[0],
+    items: itemsResult.rows,
+  };
+}
