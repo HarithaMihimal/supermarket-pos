@@ -23,3 +23,8 @@ export const productIdSchema = z.coerce.number()
   .safe();
 
 export type ProductInput = z.infer<typeof productSchema>;
+
+export const categorySchema = z.object({
+  name: z.string().trim().min(2).max(100),
+}).strict();
+export type CategoryInput = z.infer<typeof categorySchema>;

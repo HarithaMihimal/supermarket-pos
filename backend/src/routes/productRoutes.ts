@@ -40,18 +40,24 @@ import {
   listCategories,
   listProducts,
   updateProduct,
+  createCategory,
+  updateCategory,
 } from '../controllers/productController';
+import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
+router.use(authenticate);
 
 // GET all products
 router.get('/', listProducts);
 router.get('/categories', listCategories);
+router.post('/categories', authorize('admin', 'manager'), createCategory);
+router.put('/categories/:id', authorize('admin', 'manager'), updateCategory);
 
 // POST create product
-router.post('/', createProduct);
+router.post('/', authorize('admin', 'manager'), createProduct);
 
 // PUT update product
-router.put('/:id', updateProduct);
+router.put('/:id', authorize('admin', 'manager'), updateProduct);
 
 export default router;

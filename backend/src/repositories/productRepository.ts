@@ -1,5 +1,5 @@
 import { pool } from '../config/database';
-import { ProductInput } from '../schemas/productSchema';
+import { CategoryInput, ProductInput } from '../schemas/productSchema';
 
 export async function listProducts(search?: string, categoryId?: number) {
   const values: (string | number)[] = [];
@@ -33,6 +33,22 @@ export async function listCategories() {
     'SELECT category_id, name FROM categories ORDER BY name'
   );
   return result.rows;
+}
+
+export async function createCategory(data: CategoryInput) {
+  const result = await pool.query(
+    'INSERT INTO categories (name) VALUES ($1) RETURNING category_id, name',
+    [data.name],
+  );
+  return result.rows[0];
+}
+
+export async function updateCategory(id: number, data: CategoryInput) {
+  const result = await pool.query(
+    'UPDATE categories SET name = $1 WHERE category_id = $2 RETURNING category_id, name',
+    [data.name, id],
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function createProduct(data: ProductInput) {
