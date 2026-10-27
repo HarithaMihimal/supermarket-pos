@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { inventoryAdjustmentSchema } from '../schemas/inventorySchema';
 import { productIdSchema } from '../schemas/productSchema';
 import * as inventoryService from '../services/inventoryService';
+import { writeAudit } from '../utils/audit';
 
 export async function listInventory(req: Request, res: Response, next: NextFunction) {
   try {
@@ -24,6 +25,10 @@ export async function adjustInventory(req: Request, res: Response, next: NextFun
   try {
     const data = inventoryAdjustmentSchema.parse(req.body);
     const movement = await inventoryService.adjustInventory(data);
+    await writeAudit(req, 'inventory.adjusted', 'product', data.product_id, {
+      quantityDelta: data.quantity_delta,
+      reason: data.reason,
+    });
 
     res.status(201).json({
       success: true,
