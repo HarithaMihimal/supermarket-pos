@@ -12,7 +12,7 @@ import settingsRoutes from './routes/settingsRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/authRoutes';
 import { requestLogger } from './middleware/requestLogger';
-import { authenticate, authorize } from './middleware/auth';
+import { authenticate } from './middleware/auth';
 import { runMigrations } from './config/migrations';
 
 dotenv.config();
@@ -48,7 +48,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/settings', authenticate, authorize('admin', 'manager'), settingsRoutes);
+app.use('/api/settings', authenticate, settingsRoutes);
 
 app.use(errorHandler);
 

@@ -17,12 +17,13 @@ export async function runMigrations() {
   const appliedVersions = new Set(applied.rows.map(row => row.version));
 
   // Existing installations may have been provisioned manually before the runner existed.
+  // 007 is idempotent and must remain pending so legacy databases receive its settings columns.
   if (!appliedVersions.size) {
     const schemaExists = await pool.query(
       `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'branches'`,
     );
     if (schemaExists.rowCount) {
-      for (const file of files.filter(item => item < '008_')) {
+      for (const file of files.filter(item => item < '007_')) {
         await pool.query('INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
         appliedVersions.add(file);
       }

@@ -194,8 +194,14 @@ function App() {
         branch_id: Number(response.data.data.branch_id),
         default_reorder_level: Number(response.data.data.default_reorder_level),
       });
-    } catch {
-      setNotice({ type: 'error', text: 'Could not load shop settings. Run the latest database migration.' });
+    } catch (error) {
+      const responseData = (error as {
+        response?: { data?: { message?: string } };
+      }).response?.data;
+      setNotice({
+        type: 'error',
+        text: responseData?.message ?? 'Could not load shop settings.',
+      });
     } finally {
       setSettingsLoading(false);
     }
