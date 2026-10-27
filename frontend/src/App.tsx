@@ -43,6 +43,7 @@ type InventoryItem = {
   low_stock: boolean;
 };
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
+type User = { userId: number; branchId: number; fullName: string; email: string; role: 'admin' | 'manager' | 'cashier' };
 type SaleRecord = {
   sale_id: number;
   total_amount: string;
@@ -53,6 +54,7 @@ type SaleRecord = {
   change_amount: string;
   payment_method: PaymentMethod;
   item_count: number;
+  payment_reference?: string | null;
 };
 type View = 'checkout' | 'inventory' | 'sales';
 type ShopSettings = {
@@ -87,6 +89,19 @@ function App() {
   const [category, setCategory] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [amountPaid, setAmountPaid] = useState('');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [user, setUser] = useState<User | null>(() => {
+    const stored = localStorage.getItem('pos_user');
+    return stored ? JSON.parse(stored) as User : null;
+  });
+  const [loginEmail, setLoginEmail] = useState('cashier@supermarket.local');
+  const [loginPassword, setLoginPassword] = useState('password');
+  const [signupMode, setSignupMode] = useState(false);
+  const [signupName, setSignupName] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
   const [view, setView] = useState<View>('checkout');
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -107,6 +122,49 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginLoading(true);
+    try {
+      const response = await api.post<{ data: { token: string; user: User } }>('/auth/login', {
+        email: loginEmail,
+        password: loginPassword,
+      });
+      localStorage.setItem('pos_token', response.data.data.token);
+      localStorage.setItem('pos_user', JSON.stringify(response.data.data.user));
+      setUser(response.data.data.user);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Login failed.' });
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  async function signup(event: FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      if (signupPassword !== signupConfirmPassword) {
+        setNotice({ type: 'error', text: 'Passwords do not match.' });
+        return;
+      }
+      setLoginLoading(true);
+      try {
+        const response = await api.post<{ data: { token: string; user: User } }>('/auth/signup', {
+          full_name: signupName,
+          email: signupEmail,
+          password: signupPassword,
+        });
+        localStorage.setItem('pos_token', response.data.data.token);
+        localStorage.setItem('pos_user', JSON.stringify(response.data.data.user));
+        setUser(response.data.data.user);
+      } catch (error) {
+        const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+        setNotice({ type: 'error', text: message ?? 'Could not create the account.' });
+      } finally {
+        setLoginLoading(false);
+    }
+  }
 
   async function refreshCatalog() {
     const [productResponse, categoryResponse] = await Promise.all([
@@ -211,12 +269,13 @@ function App() {
   }
 
   useEffect(() => {
+    if (!user) return;
     // The initial request synchronizes the client with the API.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCatalog()
       .catch(() => setNotice({ type: 'error', text: 'Could not connect to the POS server.' }))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     // Inventory filters are persisted by fetching the matching server view.
@@ -247,6 +306,19 @@ function App() {
   const itemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
   const change = Math.max(0, Number(amountPaid || 0) - total);
 
+  function printReceipt(saleId: number, items: CartItem[], paid: number, method: PaymentMethod) {
+    const receiptWindow = window.open('', '_blank', 'width=420,height=700');
+    if (!receiptWindow) {
+      setNotice({ type: 'error', text: 'Allow pop-ups to print the receipt.' });
+      return;
+    }
+    const lines = items.map(item => `<tr><td>${item.name}</td><td>${item.cartQuantity} x ${money(Number(item.selling_price))}</td><td>${money(Number(item.selling_price) * item.cartQuantity)}</td></tr>`).join('');
+    receiptWindow.document.write(`<html><head><title>Receipt #${saleId}</title><style>body{font-family:Arial,sans-serif;width:320px;margin:20px auto;color:#111}h1{text-align:center;font-size:20px}p{text-align:center;font-size:12px}table{width:100%;font-size:11px;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #ddd}td:last-child{text-align:right}.total{font-weight:bold;font-size:14px}</style></head><body><h1>${shopSettings?.name ?? 'Supermarket POS'}</h1><p>Receipt #${saleId}<br>${new Date().toLocaleString('en-LK')}<br>Cashier: ${user?.fullName ?? 'Cashier'}</p><table>${lines}</table><p class="total">Total: ${money(total)}<br>Paid: ${money(paid)}<br>Method: ${method}<br>Change: ${money(Math.max(0, paid - total))}</p><p>${shopSettings?.receipt_footer ?? 'Thank you for shopping with us!'}</p></body></html>`);
+    receiptWindow.document.close();
+    receiptWindow.focus();
+    receiptWindow.print();
+  }
+
   function addToCart(product: Product) {
     setNotice(null);
     setCart(current => {
@@ -271,15 +343,15 @@ function App() {
   async function completeSale() {
     const parsedAmountPaid = parseAmount(amountPaid);
     if (!cart.length || parsedAmountPaid === null) {
-      setNotice({ type: 'error', text: 'Enter a valid cash amount.' });
+      setNotice({ type: 'error', text: 'Enter a valid payment amount.' });
       return;
     }
-    if (parsedAmountPaid < total) {
+    if (parsedAmountPaid < total || (paymentMethod !== 'cash' && parsedAmountPaid !== total)) {
       setNotice({ type: 'error', text: 'Cash received must cover the sale total.' });
       return;
     }
-    if (paymentMethod !== 'cash') {
-      setNotice({ type: 'error', text: 'Card and bank transfer payments are coming soon. Select Cash.' });
+    if (paymentMethod !== 'cash' && !paymentReference.trim()) {
+      setNotice({ type: 'error', text: 'Enter a payment reference for this payment.' });
       return;
     }
     setCheckingOut(true);
@@ -289,13 +361,17 @@ function App() {
         items: cart.map(item => ({ product_id: Number(item.product_id), quantity: item.cartQuantity })),
         payment_method: paymentMethod,
         amount_paid: parsedAmountPaid,
+        payment_reference: paymentReference.trim() || undefined,
       });
+      const completedItems = [...cart];
       setNotice({
         type: 'success',
         text: `Sale #${response.data.data.sale_id} completed. Change: ${money(response.data.data.change)}`,
       });
+      printReceipt(response.data.data.sale_id, completedItems, parsedAmountPaid, paymentMethod);
       setCart([]);
       setAmountPaid('');
+      setPaymentReference('');
       await refreshCatalog();
       if (view === 'inventory') await refreshInventory();
     } catch (error) {
@@ -337,12 +413,14 @@ function App() {
     }
   }
 
+  if (!user) return <div className="login-page"><form className="login-card" onSubmit={event => void (signupMode ? signup(event) : login(event))}><div className="brand"><div className="brand-mark"><ShoppingCart size={20} /></div><span>Market<span className="brand-accent">Flow</span></span></div><h1>{signupMode ? 'Create your POS account' : 'Sign in to POS'}</h1>{signupMode ? <><label>Full name<input value={signupName} onChange={event => setSignupName(event.target.value)} required /></label><label>Email<input type="email" value={signupEmail} onChange={event => setSignupEmail(event.target.value)} required /></label><label>Password<input type="password" value={signupPassword} onChange={event => setSignupPassword(event.target.value)} minLength={8} required /></label><label>Confirm password<input type="password" value={signupConfirmPassword} onChange={event => setSignupConfirmPassword(event.target.value)} minLength={8} required /></label></> : <><label>Email<input type="email" value={loginEmail} onChange={event => setLoginEmail(event.target.value)} required /></label><label>Password<input type="password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} required /></label></>}{notice && <div className="notice error">{notice.text}</div>}<button className="complete-button" disabled={loginLoading}>{loginLoading ? (signupMode ? 'Creating account...' : 'Signing in...') : (signupMode ? 'Create account' : 'Sign in')}</button><button type="button" className="text-button login-switch" onClick={() => { setSignupMode(!signupMode); setNotice(null); }}>{signupMode ? 'Already have an account? Sign in' : 'First time here? Create an account'}</button>{!signupMode && <small>Demo cashier: cashier@supermarket.local / password</small>}<small>New accounts are created as cashier accounts.</small></form></div>;
+
   return (
     <div className="pos-app">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><ShoppingCart size={20} /></div><span>Market<span className="brand-accent">Flow</span></span></div>
         <div className="store-status"><span className="status-dot" /> {shopSettings?.name ?? 'Main Branch'} <span className="status-divider" /> Register 01</div>
-        <div className="user-menu"><button className="settings-trigger" onClick={() => void openSettings()} aria-label="Open shop settings"><Settings size={17} /></button><div className="avatar">DC</div><span>Demo Cashier</span></div>
+        <div className="user-menu"><button className="settings-trigger" onClick={() => void openSettings()} aria-label="Open shop settings"><Settings size={17} /></button><div className="avatar">{user.fullName.slice(0, 2).toUpperCase()}</div><span>{user.fullName}</span><button className="text-button" onClick={() => { localStorage.clear(); setUser(null); }}>Sign out</button></div>
       </header>
 
       <div className="layout">
@@ -423,9 +501,9 @@ function App() {
           </div>
           <div className="checkout-bottom">
             <div className="totals"><div><span>Subtotal</span><strong>{money(total)}</strong></div><div><span>Tax</span><strong>{money(0)}</strong></div><div className="grand-total"><span>Total</span><strong>{money(total)}</strong></div></div>
-            <div className="payment-section"><p className="section-label">Payment method</p><div className="payment-options">{(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map(method => <button className={paymentMethod === method ? 'selected' : ''} key={method} onClick={() => setPaymentMethod(method)} disabled={method !== 'cash'}>{method === 'cash' ? <Banknote size={17} /> : method === 'card' ? <CreditCard size={17} /> : <WalletCards size={17} />}<span>{method === 'bank_transfer' ? 'Transfer' : method[0].toUpperCase() + method.slice(1)}</span></button>)}</div><label className="amount-label">Amount received<input type="text" inputMode="decimal" value={amountPaid} onChange={event => setAmountPaid(event.target.value)} placeholder="0.00" /></label>{(parseAmount(amountPaid) ?? 0) >= total && total > 0 && <div className="change-row"><span>Change</span><strong>{money(change)}</strong></div>}</div>
-            <button className="complete-button" onClick={completeSale} disabled={checkingOut || !cart.length || (parseAmount(amountPaid) ?? 0) < total}>{checkingOut ? 'Processing...' : `Complete cash sale · ${money(total)}`}</button>
-            <div className="cashier-note"><UserRound size={14} /> Sale will be recorded under Demo Cashier</div>
+            <div className="payment-section"><p className="section-label">Payment method</p><div className="payment-options">{(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map(method => <button className={paymentMethod === method ? 'selected' : ''} key={method} onClick={() => { setPaymentMethod(method); setPaymentReference(''); }}>{method === 'cash' ? <Banknote size={17} /> : method === 'card' ? <CreditCard size={17} /> : <WalletCards size={17} />}<span>{method === 'bank_transfer' ? 'Transfer' : method[0].toUpperCase() + method.slice(1)}</span></button>)}</div><label className="amount-label">{paymentMethod === 'cash' ? 'Amount received' : 'Amount paid'}<input type="text" inputMode="decimal" value={amountPaid} onChange={event => setAmountPaid(event.target.value)} placeholder="0.00" /></label>{paymentMethod !== 'cash' && <label className="amount-label">Payment reference<input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} placeholder="Receipt or transfer reference" /></label>}{(parseAmount(amountPaid) ?? 0) >= total && total > 0 && <div className="change-row"><span>Change</span><strong>{money(change)}</strong></div>}</div>
+            <button className="complete-button" onClick={completeSale} disabled={checkingOut || !cart.length || (parseAmount(amountPaid) ?? 0) < total}>{checkingOut ? 'Processing...' : `Complete sale · ${money(total)}`}</button>
+            <div className="cashier-note"><UserRound size={14} /> Sale will be recorded under {user.fullName}</div>
           </div>
         </aside>
       </div>

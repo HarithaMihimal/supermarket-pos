@@ -10,6 +10,10 @@ import saleRoutes from './routes/saleRoutes';
 import inventoryRoutes from './routes/inventoryRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import { errorHandler } from './middleware/errorHandler';
+import authRoutes from './routes/authRoutes';
+import { requestLogger } from './middleware/requestLogger';
+import { authenticate, authorize } from './middleware/auth';
+import { runMigrations } from './config/migrations';
 
 dotenv.config();
 
@@ -21,6 +25,7 @@ app.use(cors({
   origin: process.env.FRONTEND_URL,
 }));
 app.use(express.json());
+app.use(requestLogger);
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -42,12 +47,14 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/inventory', inventoryRoutes);
-app.use('/api/settings', settingsRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/settings', authenticate, authorize('admin', 'manager'), settingsRoutes);
 
 app.use(errorHandler);
 
 async function start() {
   try {
+    await runMigrations();
     await testDatabaseConnection();
 
     app.listen(PORT, () => {

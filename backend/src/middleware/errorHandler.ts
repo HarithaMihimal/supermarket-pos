@@ -4,7 +4,7 @@ import { AppError } from '../utils/AppError';
 
 export function errorHandler(
   err: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ) {
@@ -32,7 +32,9 @@ export function errorHandler(
   if (dbError.code === '23505') {
     return res.status(409).json({
       success: false,
-      message: 'A product with this barcode already exists',
+      message: dbError.constraint === 'users_email_key'
+        ? 'An account with this email already exists'
+        : 'A record with the same unique value already exists',
     });
   }
 
@@ -43,10 +45,18 @@ export function errorHandler(
     });
   }
 
-  console.error('Unexpected error:', err);
+  console.error(JSON.stringify({
+    event: 'http_error',
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  }));
 
   return res.status(500).json({
     success: false,
     message: 'Internal server error',
+    request_id: req.requestId,
   });
 }
