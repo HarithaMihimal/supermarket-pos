@@ -1,9 +1,9 @@
 import { pool } from '../config/database';
-import { SaleInput } from '../schemas/saleSchema';
+import { AuthorizedSaleInput } from '../schemas/saleSchema';
 import { SalesHistoryQuery } from '../schemas/salesHistorySchema';
 import { AppError } from '../utils/AppError';
 
-export async function createSale(data: SaleInput) {
+export async function createSale(data: AuthorizedSaleInput) {
   const client = await pool.connect();
 
   try {
@@ -48,6 +48,9 @@ export async function createSale(data: SaleInput) {
     if (data.amount_paid < total) {
       throw new AppError(400, 'Payment amount is less than the sale total');
     }
+    if (data.payment_method !== 'cash' && data.amount_paid !== total) {
+      throw new AppError(400, 'Card and bank transfer payments must match the sale total');
+    }
 
     const sale = await client.query(
       `INSERT INTO sales (branch_id, cashier_id, total_amount)
@@ -75,19 +78,21 @@ export async function createSale(data: SaleInput) {
     }
 
     await client.query(
-      `INSERT INTO payments (sale_id, amount, payment_method, change_amount)
-       VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO payments (sale_id, amount, payment_method, change_amount, payment_reference)
+       VALUES ($1, $2, $3, $4, $5)`,
       [
         sale.rows[0].sale_id,
         data.amount_paid,
         data.payment_method,
         Math.round((data.amount_paid - total) * 100) / 100,
+        data.payment_reference ?? null,
       ],
     );
     await client.query('COMMIT');
 
     return {
       ...sale.rows[0],
+      payment_method: data.payment_method,
       change: Math.round((data.amount_paid - total) * 100) / 100,
       items: lineItems,
     };
@@ -124,7 +129,7 @@ export async function listSales(query: SalesHistoryQuery) {
   const result = await pool.query(`
     SELECT s.sale_id, s.total_amount, s.status, s.created_at,
            u.full_name AS cashier,
-           p.amount AS amount_paid, p.change_amount, p.payment_method,
+           p.amount AS amount_paid, p.change_amount, p.payment_method, p.payment_reference,
            COUNT(si.sale_item_id)::int AS item_count
     FROM sales s
     JOIN users u ON u.user_id = s.cashier_id
