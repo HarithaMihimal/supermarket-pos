@@ -39,3 +39,11 @@ export async function updateProduct(
 
   return product;
 }
+
+export async function removeProduct(id: number) {
+  const product = await productRepository.removeProduct(id);
+  if (!product) {
+    throw new AppError(404, 'Product not found');
+  }
+  return product;
+}

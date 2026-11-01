@@ -29,6 +29,7 @@ type Product = {
   category: string | null;
   category_id: number | null;
   quantity: string;
+  is_new: boolean;
 };
 
 type CartItem = Product & { cartQuantity: number };
@@ -271,6 +272,19 @@ function App() {
       setCsvImporting(false);
     }
 
+  }
+
+  async function removeProduct(product: Product) {
+    if (!window.confirm(`Remove "${product.name}" from the active catalog?`)) return;
+    try {
+      await api.delete(`/products/${product.product_id}`);
+      setCart(current => current.filter(item => item.product_id !== product.product_id));
+      setNotice({ type: 'success', text: `${product.name} was removed from the catalog.` });
+      await refreshCatalog();
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not remove product.' });
+    }
   }
 
   function downloadCsvTemplate() {
@@ -586,9 +600,12 @@ function App() {
               {!loading && !filteredProducts.length && <div className="empty-state">No products match your search.</div>}
               {filteredProducts.map(product => {
                 const outOfStock = Number(product.quantity) <= 0;
-                return <button className="product-card" key={product.product_id} onClick={() => addToCart(product)} disabled={outOfStock}>
-                  <div className="product-icon"><Package size={23} /></div><div className="product-info"><span className="product-category">{product.category ?? 'General'}</span><strong>{product.name}</strong><span className="stock">{outOfStock ? 'Out of stock' : `${product.quantity} in stock`}</span></div><span className="product-price">{money(Number(product.selling_price))}</span>
-                </button>;
+                return <div className="product-card" key={product.product_id}>
+                  <button className="product-card-main" onClick={() => addToCart(product)} disabled={outOfStock}>
+                    <div className="product-icon"><Package size={23} /></div><div className="product-info"><span className="product-category">{product.category ?? 'General'}</span><strong>{product.name}</strong><span className="stock">{outOfStock ? 'Out of stock' : `${product.quantity} in stock`}</span></div><span className="product-price">{money(Number(product.selling_price))}</span>
+                  </button>
+                  <div className="product-card-footer">{product.is_new && <span className="new-badge">NEW</span>}{canManageProducts() && <button className="remove-product-button" onClick={() => void removeProduct(product)} aria-label={`Remove ${product.name}`}><Trash2 size={14} /> Remove</button>}</div>
+                </div>;
               })}
             </div>
           </section> : view === 'inventory' ? <section className="catalog-panel panel inventory-panel">

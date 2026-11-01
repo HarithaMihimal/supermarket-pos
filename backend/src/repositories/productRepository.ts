@@ -17,7 +17,7 @@ export async function listProducts(search?: string, categoryId?: number) {
   }
 
   const result = await pool.query(`
-    SELECT p.product_id, p.name, p.barcode, p.selling_price,
+    SELECT p.product_id, p.name, p.barcode, p.selling_price, p.is_new,
            c.category_id, c.name AS category, COALESCE(i.quantity, 0) AS quantity
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.category_id
@@ -58,8 +58,8 @@ export async function createProduct(data: ProductInput) {
     await client.query('BEGIN');
     const result = await client.query(`
       INSERT INTO products
-        (name, barcode, category_id, cost_price, selling_price, active)
-      VALUES ($1, $2, $3, $4, $5, $6)
+        (name, barcode, category_id, cost_price, selling_price, active, is_new)
+      VALUES ($1, $2, $3, $4, $5, $6, TRUE)
       RETURNING *;
     `, [
       data.name, data.barcode, data.category_id, data.cost_price,
@@ -104,8 +104,8 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
       );
       const product = await client.query(`
         INSERT INTO products
-          (name, barcode, category_id, cost_price, selling_price, active)
-        VALUES ($1, $2, $3, $4, $5, $6)
+          (name, barcode, category_id, cost_price, selling_price, active, is_new)
+        VALUES ($1, $2, $3, $4, $5, $6, TRUE)
         ON CONFLICT (barcode) DO UPDATE SET
           name = EXCLUDED.name,
           category_id = EXCLUDED.category_id,
@@ -136,6 +136,17 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
   } finally {
     client.release();
   }
+}
+
+export async function removeProduct(id: number) {
+  const result = await pool.query(
+    `UPDATE products
+     SET active = FALSE
+     WHERE product_id = $1
+     RETURNING product_id, name`,
+    [id],
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function updateProduct(

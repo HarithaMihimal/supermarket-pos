@@ -44,6 +44,7 @@ import {
   createCategory,
   updateCategory,
   importProducts,
+  removeProduct,
 } from '../controllers/productController';
 import { authenticate, authorize } from '../middleware/auth';
 
@@ -62,5 +63,6 @@ router.post('/import-csv', authorize('admin', 'manager'), express.text({ type: [
 
 // PUT update product
 router.put('/:id', authorize('admin', 'manager'), updateProduct);
+router.delete('/:id', authorize('admin', 'manager'), removeProduct);
 
 export default router;

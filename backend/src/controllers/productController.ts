@@ -66,7 +66,17 @@ export async function updateProduct(
   } catch (error) {
     next(error);
   }
+}
 
+export async function removeProduct(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = productIdSchema.parse(req.params.id);
+    const product = await productService.removeProduct(id);
+    await writeAudit(req, 'product.removed', 'product', id, { name: product.name });
+    res.json({ success: true, message: 'Product removed from the active catalog' });
+  } catch (error) {
+    next(error);
+  }
 }
 
 function parseCsvRow(line: string) {
