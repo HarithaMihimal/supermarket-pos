@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
 export const inventoryAdjustmentSchema = z.object({
-  branch_id: z.number().int().positive().default(1),
-  product_id: z.number().int().positive(),
-  quantity_delta: z.number().finite().refine(value => value !== 0, {
+  branch_id: z.coerce.number().int().positive().default(1),
+  product_id: z.coerce.number().int().positive(),
+  quantity_delta: z.coerce.number().finite().refine(value => value !== 0, {
     message: 'Quantity adjustment cannot be zero',
   }),
   reason: z.enum(['receipt', 'adjustment', 'damage', 'opening_balance']),

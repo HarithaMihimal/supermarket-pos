@@ -362,7 +362,13 @@ function App() {
       const response = await api.get<{ data: InventoryItem[] }>('/inventory', {
         params: { search: inventorySearch || undefined, low_stock: lowStockOnly },
       });
-      setInventory(response.data.data);
+      setInventory(response.data.data.map(item => ({
+        ...item,
+        inventory_id: Number(item.inventory_id),
+        product_id: Number(item.product_id),
+        quantity: String(item.quantity),
+        reorder_level: String(item.reorder_level),
+      })));
     } catch {
       setNotice({ type: 'error', text: 'Could not load inventory.' });
     } finally {
@@ -560,8 +566,16 @@ function App() {
       setAdjustmentNote('');
       await Promise.all([refreshInventory(), refreshCatalog()]);
     } catch (error) {
-      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
-      setNotice({ type: 'error', text: message ?? 'Inventory update failed.' });
+      const responseData = (error as {
+        response?: { data?: { message?: string; errors?: { field: string; message: string }[] } };
+      }).response?.data;
+      const validationError = responseData?.errors?.[0];
+      setNotice({
+        type: 'error',
+        text: validationError
+          ? `${validationError.field || 'Adjustment'}: ${validationError.message}`
+          : responseData?.message ?? 'Inventory update failed.',
+      });
     }
   }
 

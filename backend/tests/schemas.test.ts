@@ -3,6 +3,7 @@ import test from 'node:test';
 import { loginSchema, signupSchema } from '../src/schemas/authSchema';
 import { saleSchema } from '../src/schemas/saleSchema';
 import { productSchema } from '../src/schemas/productSchema';
+import { inventoryAdjustmentSchema } from '../src/schemas/inventorySchema';
 
 test('login schema rejects malformed credentials', () => {
   assert.equal(loginSchema.safeParse({ email: 'not-an-email', password: '' }).success, false);
@@ -40,4 +41,17 @@ test('product schema rejects prices with more than two decimals', () => {
     selling_price: 2,
     active: true,
   }).success, false);
+});
+
+test('inventory adjustment schema accepts numeric values returned by PostgreSQL', () => {
+  const result = inventoryAdjustmentSchema.safeParse({
+    product_id: '1',
+    quantity_delta: '2',
+    reason: 'receipt',
+  });
+  assert.equal(result.success, true);
+  if (result.success) {
+    assert.equal(result.data.product_id, 1);
+    assert.equal(result.data.quantity_delta, 2);
+  }
 });
