@@ -1,5 +1,6 @@
 import * as productRepository from '../repositories/productRepository';
 import { CategoryInput, ProductInput } from '../schemas/productSchema';
+import { ProductImportRow } from '../schemas/productImportSchema';
 import { AppError } from '../utils/AppError';
 
 export async function listProducts(search?: string, categoryId?: number) {
@@ -20,6 +21,10 @@ export async function updateCategory(id: number, data: CategoryInput) {
 
 export async function createProduct(data: ProductInput) {
   return productRepository.createProduct(data);
+}
+
+export async function importProducts(rows: ProductImportRow[], importedBy?: number, fileName?: string) {
+  return productRepository.importProducts(rows, importedBy, fileName);
 }
 
 export async function updateProduct(

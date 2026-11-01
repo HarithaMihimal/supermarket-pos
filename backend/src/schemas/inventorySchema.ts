@@ -6,7 +6,7 @@ export const inventoryAdjustmentSchema = z.object({
   quantity_delta: z.number().finite().refine(value => value !== 0, {
     message: 'Quantity adjustment cannot be zero',
   }),
-  reason: z.enum(['receipt', 'adjustment', 'damage']),
+  reason: z.enum(['receipt', 'adjustment', 'damage', 'opening_balance']),
   note: z.string().trim().max(500).optional(),
 }).strict().refine(
   data => Number.isInteger(data.quantity_delta * 1000),

@@ -3,6 +3,7 @@ import { categorySchema, productSchema, productIdSchema } from '../schemas/produ
 import * as productService from '../services/productService';
 import { AppError } from '../utils/AppError';
 import { writeAudit } from '../utils/audit';
+import { productImportRowSchema } from '../schemas/productImportSchema';
 
 export async function listProducts(req: Request, res: Response, next: NextFunction) {
   try {
@@ -62,6 +63,64 @@ export async function updateProduct(
       message: 'Product updated successfully',
       data: product,
     });
+  } catch (error) {
+    next(error);
+  }
+
+}
+
+function parseCsvRow(line: string) {
+  const values: string[] = [];
+  let value = '';
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === ',' && !quoted) {
+      values.push(value.trim());
+      value = '';
+    } else {
+      value += character;
+    }
+  }
+  if (quoted) throw new AppError(400, 'CSV contains an unclosed quoted value');
+  values.push(value.trim());
+  return values;
+}
+
+export async function importProducts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const csv = typeof req.body === 'string' ? req.body.replace(/^\uFEFF/, '').trim() : '';
+    if (!csv) throw new AppError(400, 'CSV file is empty');
+    const lines = csv.split(/\r?\n/).filter(line => line.trim());
+    const headers = parseCsvRow(lines[0]).map(header => header.toLowerCase());
+    const requiredHeaders = ['name', 'barcode', 'category', 'cost_price', 'selling_price'];
+    const missing = requiredHeaders.filter(header => !headers.includes(header));
+    if (missing.length) throw new AppError(400, `CSV is missing required columns: ${missing.join(', ')}`);
+
+    const rows = lines.slice(1).map((line, index) => {
+      const values = parseCsvRow(line);
+      if (values.length !== headers.length) {
+        throw new AppError(400, `CSV row ${index + 2} has an incorrect number of columns`);
+      }
+      const raw = Object.fromEntries(headers.map((header, valueIndex) => [header, values[valueIndex]]));
+      const parsed = productImportRowSchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new AppError(400, `CSV row ${index + 2}: ${parsed.error.issues[0].message}`);
+      }
+      return parsed.data;
+    });
+    if (!rows.length) throw new AppError(400, 'CSV has no product rows');
+
+    const result = await productService.importProducts(rows, req.user?.userId, req.header('x-file-name'));
+    await writeAudit(req, 'products.imported', 'product', undefined, { count: result.products.length, batch_id: result.batchId });
+    res.status(201).json({ success: true, message: `${result.products.length} products imported successfully`, data: result });
   } catch (error) {
     next(error);
   }

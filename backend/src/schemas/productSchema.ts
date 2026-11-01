@@ -7,6 +7,8 @@ export const productSchema = z.object({
   cost_price: z.number().finite().nonnegative(),
   selling_price: z.number().finite().nonnegative(),
   active: z.boolean().default(true),
+  initial_quantity: z.number().finite().nonnegative().default(0),
+  reorder_level: z.number().finite().nonnegative().default(10),
 }).strict().refine(
   (data) =>
     Number.isInteger(data.cost_price * 100) &&
@@ -14,7 +16,13 @@ export const productSchema = z.object({
   {
     message: 'Prices must have at most 2 decimal places',
     path: ['selling_price'],
-  }
+  },
+).refine(
+  data => Number.isInteger(data.initial_quantity * 1000) && Number.isInteger(data.reorder_level * 1000),
+  {
+    message: 'Quantities must have at most 3 decimal places',
+    path: ['initial_quantity'],
+  },
 );
 
 export const productIdSchema = z.coerce.number()

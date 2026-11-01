@@ -35,6 +35,7 @@
 // export default router;
 
 import { Router } from 'express';
+import express from 'express';
 import {
   createProduct,
   listCategories,
@@ -42,6 +43,7 @@ import {
   updateProduct,
   createCategory,
   updateCategory,
+  importProducts,
 } from '../controllers/productController';
 import { authenticate, authorize } from '../middleware/auth';
 
@@ -56,6 +58,7 @@ router.put('/categories/:id', authorize('admin', 'manager'), updateCategory);
 
 // POST create product
 router.post('/', authorize('admin', 'manager'), createProduct);
+router.post('/import-csv', authorize('admin', 'manager'), express.text({ type: ['text/csv', 'text/plain'], limit: '2mb' }), importProducts);
 
 // PUT update product
 router.put('/:id', authorize('admin', 'manager'), updateProduct);

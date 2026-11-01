@@ -1,5 +1,6 @@
 import { pool } from '../config/database';
 import { CategoryInput, ProductInput } from '../schemas/productSchema';
+import { ProductImportRow } from '../schemas/productImportSchema';
 
 export async function listProducts(search?: string, categoryId?: number) {
   const values: (string | number)[] = [];
@@ -66,11 +67,60 @@ export async function createProduct(data: ProductInput) {
     ]);
     await client.query(
       `INSERT INTO inventory (branch_id, product_id, quantity)
-       VALUES (1, $1, 0)`,
-      [result.rows[0].product_id],
+       VALUES (1, $1, $2)
+       ON CONFLICT (branch_id, product_id)
+       DO UPDATE SET quantity = EXCLUDED.quantity, reorder_level = $3`,
+      [result.rows[0].product_id, data.initial_quantity, data.reorder_level],
     );
     await client.query('COMMIT');
     return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+}
+
+export async function importProducts(rows: ProductImportRow[], importedBy?: number, fileName?: string) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const batch = await client.query(
+      `INSERT INTO product_import_batches (branch_id, imported_by, file_name, row_count)
+       VALUES (1, $1, $2, $3)
+       RETURNING import_batch_id`,
+      [importedBy ?? null, fileName ?? null, rows.length],
+    );
+    const imported = [];
+
+    for (const row of rows) {
+      const category = await client.query(
+        `INSERT INTO categories (name) VALUES ($1)
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING category_id`,
+        [row.category],
+      );
+      const product = await client.query(`
+        INSERT INTO products
+          (name, barcode, category_id, cost_price, selling_price, active)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING product_id, name, barcode
+      `, [
+        row.name, row.barcode, category.rows[0].category_id,
+        row.cost_price, row.selling_price, row.active,
+      ]);
+      await client.query(
+        `INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
+         VALUES (1, $1, $2, $3)`,
+        [product.rows[0].product_id, row.initial_quantity, row.reorder_level],
+      );
+      imported.push(product.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    return { batchId: batch.rows[0].import_batch_id, products: imported };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
