@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from './services/api';
 import {
   Banknote,
@@ -156,6 +156,8 @@ function App() {
     initial_quantity: '0', reorder_level: '10',
   });
   const [csvImporting, setCsvImporting] = useState(false);
+  const [csvPortalOpen, setCsvPortalOpen] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -249,9 +251,8 @@ function App() {
     }
   }
 
-  async function importProductsFromCsv(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  async function importProductsFromCsv() {
+    const file = csvFile;
     if (!file) return;
     setCsvImporting(true);
     try {
@@ -260,6 +261,8 @@ function App() {
         headers: { 'Content-Type': 'text/csv', 'X-File-Name': file.name },
       });
       setNotice({ type: 'success', text: response.data.message });
+      setCsvPortalOpen(false);
+      setCsvFile(null);
       await refreshCatalog();
     } catch (error) {
       const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
@@ -573,7 +576,7 @@ function App() {
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
           {view === 'checkout' ? <section className="catalog-panel panel">
-            <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><div className="catalog-actions"><span className="product-count">{filteredProducts.length} products</span>{canManageProducts() && <><button className="small-button" onClick={() => setProductFormOpen(true)}>Add product</button><label className="small-button secondary-button">{csvImporting ? 'Importing...' : 'Import CSV'}<input type="file" accept=".csv,text/csv" onChange={event => void importProductsFromCsv(event)} disabled={csvImporting} /></label></>}</div></div>
+            <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><div className="catalog-actions"><span className="product-count">{filteredProducts.length} products</span>{canManageProducts() && <><button className="small-button" onClick={() => setProductFormOpen(true)}>Manual add</button><button className="small-button secondary-button" onClick={() => setCsvPortalOpen(true)}>Upload CSV</button></>}</div></div>
             <div className="catalog-controls">
               <div className="search-box"><Search size={18} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name or scan barcode..." /><Barcode size={18} className="muted-icon" /></div>
               <select value={category} onChange={event => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map(item => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select>
@@ -666,6 +669,17 @@ function App() {
             <div className="form-grid"><label>Cost price<input required type="text" inputMode="decimal" value={productForm.cost_price} onChange={event => setProductForm({ ...productForm, cost_price: event.target.value })} /></label><label>Selling price<input required type="text" inputMode="decimal" value={productForm.selling_price} onChange={event => setProductForm({ ...productForm, selling_price: event.target.value })} /></label><label>Initial quantity<input required type="text" inputMode="decimal" value={productForm.initial_quantity} onChange={event => setProductForm({ ...productForm, initial_quantity: event.target.value })} /></label><label>Reorder level<input required type="text" inputMode="decimal" value={productForm.reorder_level} onChange={event => setProductForm({ ...productForm, reorder_level: event.target.value })} /></label></div>
             <div className="product-dialog-actions"><button type="button" className="text-button" onClick={downloadCsvTemplate}>Download CSV template</button><button type="button" className="text-button" onClick={() => setProductFormOpen(false)}>Cancel</button><button className="small-button" disabled={productSaving}>{productSaving ? 'Saving...' : 'Add product'}</button></div>
           </form>
+        </section>
+      </div>}
+      {csvPortalOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) { setCsvPortalOpen(false); setCsvFile(null); } }}>
+        <section className="settings-dialog product-dialog" role="dialog" aria-modal="true" aria-labelledby="csv-dialog-title">
+          <div className="settings-dialog-header"><div><p className="eyebrow">CATALOG MANAGEMENT</p><h2 id="csv-dialog-title">Upload catalog CSV</h2><p>New barcodes are added and existing barcodes are updated without removing previous products.</p></div><button className="settings-close" onClick={() => { setCsvPortalOpen(false); setCsvFile(null); }} aria-label="Close CSV upload"><X size={18} /></button></div>
+          <div className="csv-upload-portal">
+            <label className="csv-file-picker">Choose CSV file<input type="file" accept=".csv,text/csv" onChange={event => setCsvFile(event.target.files?.[0] ?? null)} disabled={csvImporting} /></label>
+            <p className="csv-file-name">{csvFile ? csvFile.name : 'No file selected'}</p>
+            <p className="csv-help">Required columns: name, barcode, category, cost_price, selling_price.</p>
+          </div>
+          <div className="product-dialog-actions"><button type="button" className="text-button" onClick={downloadCsvTemplate}>Download CSV template</button><button type="button" className="text-button" onClick={() => { setCsvPortalOpen(false); setCsvFile(null); }}>Cancel</button><button type="button" className="small-button" disabled={!csvFile || csvImporting} onClick={() => void importProductsFromCsv()}>{csvImporting ? 'Uploading...' : 'Upload catalog'}</button></div>
         </section>
       </div>}
       {settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>

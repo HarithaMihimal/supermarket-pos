@@ -106,6 +106,12 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
         INSERT INTO products
           (name, barcode, category_id, cost_price, selling_price, active)
         VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (barcode) DO UPDATE SET
+          name = EXCLUDED.name,
+          category_id = EXCLUDED.category_id,
+          cost_price = EXCLUDED.cost_price,
+          selling_price = EXCLUDED.selling_price,
+          active = EXCLUDED.active
         RETURNING product_id, name, barcode
       `, [
         row.name, row.barcode, category.rows[0].category_id,
@@ -113,7 +119,10 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
       ]);
       await client.query(
         `INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
-         VALUES (1, $1, $2, $3)`,
+         VALUES (1, $1, $2, $3)
+         ON CONFLICT (branch_id, product_id) DO UPDATE SET
+           quantity = EXCLUDED.quantity,
+           reorder_level = EXCLUDED.reorder_level`,
         [product.rows[0].product_id, row.initial_quantity, row.reorder_level],
       );
       imported.push(product.rows[0]);
