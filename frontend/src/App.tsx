@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from './services/api';
 import {
   Banknote,
@@ -83,6 +83,15 @@ type ShopSettings = {
   receipt_footer: string;
   default_reorder_level: number;
 };
+type ProductForm = {
+  name: string;
+  barcode: string;
+  category_id: string;
+  cost_price: string;
+  selling_price: string;
+  initial_quantity: string;
+  reorder_level: string;
+};
 
 const parseAmount = (value: string) => {
   const normalized = value.trim();
@@ -140,6 +149,13 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
+  const [productFormOpen, setProductFormOpen] = useState(false);
+  const [productSaving, setProductSaving] = useState(false);
+  const [productForm, setProductForm] = useState<ProductForm>({
+    name: '', barcode: '', category_id: '', cost_price: '', selling_price: '',
+    initial_quantity: '0', reorder_level: '10',
+  });
+  const [csvImporting, setCsvImporting] = useState(false);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -200,6 +216,68 @@ function App() {
       ...item,
       category_id: Number(item.category_id),
     })));
+  }
+
+  function canManageProducts() {
+    return user?.role === 'admin' || user?.role === 'manager';
+  }
+
+  async function saveProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setProductSaving(true);
+    try {
+      await api.post<{ data: Product }>('/products', {
+        name: productForm.name,
+        barcode: productForm.barcode,
+        category_id: Number(productForm.category_id),
+        cost_price: Number(productForm.cost_price),
+        selling_price: Number(productForm.selling_price),
+        initial_quantity: Number(productForm.initial_quantity),
+        reorder_level: Number(productForm.reorder_level),
+        active: true,
+      });
+      setProductFormOpen(false);
+      setProductForm({ name: '', barcode: '', category_id: '', cost_price: '', selling_price: '', initial_quantity: '0', reorder_level: '10' });
+      setNotice({ type: 'success', text: 'Product added successfully.' });
+      await refreshCatalog();
+    } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
+      const validationError = responseData?.errors?.[0];
+      setNotice({ type: 'error', text: validationError ? `${validationError.field}: ${validationError.message}` : responseData?.message ?? 'Could not add product.' });
+    } finally {
+      setProductSaving(false);
+    }
+  }
+
+  async function importProductsFromCsv(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setCsvImporting(true);
+    try {
+      const csv = await file.text();
+      const response = await api.post<{ message: string }>('/products/import-csv', csv, {
+        headers: { 'Content-Type': 'text/csv', 'X-File-Name': file.name },
+      });
+      setNotice({ type: 'success', text: response.data.message });
+      await refreshCatalog();
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not import products.' });
+    } finally {
+      setCsvImporting(false);
+    }
+
+  }
+
+  function downloadCsvTemplate() {
+    const content = 'name,barcode,category,cost_price,selling_price,initial_quantity,reorder_level,active\nExample Product,20000001,Snacks,100.00,150.00,25,5,true\n';
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'products-template.csv';
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function openSettings() {
@@ -495,7 +573,7 @@ function App() {
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
           {view === 'checkout' ? <section className="catalog-panel panel">
-            <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><span className="product-count">{filteredProducts.length} products</span></div>
+            <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><div className="catalog-actions"><span className="product-count">{filteredProducts.length} products</span>{canManageProducts() && <><button className="small-button" onClick={() => setProductFormOpen(true)}>Add product</button><label className="small-button secondary-button">{csvImporting ? 'Importing...' : 'Import CSV'}<input type="file" accept=".csv,text/csv" onChange={event => void importProductsFromCsv(event)} disabled={csvImporting} /></label></>}</div></div>
             <div className="catalog-controls">
               <div className="search-box"><Search size={18} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name or scan barcode..." /><Barcode size={18} className="muted-icon" /></div>
               <select value={category} onChange={event => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map(item => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select>
@@ -578,6 +656,18 @@ function App() {
           </div>
         </aside>
       </div>
+      {productFormOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setProductFormOpen(false); }}>
+        <section className="settings-dialog product-dialog" role="dialog" aria-modal="true" aria-labelledby="product-dialog-title">
+          <div className="settings-dialog-header"><div><p className="eyebrow">CATALOG MANAGEMENT</p><h2 id="product-dialog-title">Add product</h2><p>Create a product and initialize its stock level.</p></div><button className="settings-close" onClick={() => setProductFormOpen(false)} aria-label="Close add product"><X size={18} /></button></div>
+          <form className="product-form" onSubmit={event => void saveProduct(event)}>
+            <label>Product name<input required minLength={2} maxLength={200} value={productForm.name} onChange={event => setProductForm({ ...productForm, name: event.target.value })} /></label>
+            <label>Barcode<input required minLength={3} maxLength={100} value={productForm.barcode} onChange={event => setProductForm({ ...productForm, barcode: event.target.value })} /></label>
+            <label>Category<select required value={productForm.category_id} onChange={event => setProductForm({ ...productForm, category_id: event.target.value })}><option value="">Select category</option>{categories.map(item => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></label>
+            <div className="form-grid"><label>Cost price<input required type="text" inputMode="decimal" value={productForm.cost_price} onChange={event => setProductForm({ ...productForm, cost_price: event.target.value })} /></label><label>Selling price<input required type="text" inputMode="decimal" value={productForm.selling_price} onChange={event => setProductForm({ ...productForm, selling_price: event.target.value })} /></label><label>Initial quantity<input required type="text" inputMode="decimal" value={productForm.initial_quantity} onChange={event => setProductForm({ ...productForm, initial_quantity: event.target.value })} /></label><label>Reorder level<input required type="text" inputMode="decimal" value={productForm.reorder_level} onChange={event => setProductForm({ ...productForm, reorder_level: event.target.value })} /></label></div>
+            <div className="product-dialog-actions"><button type="button" className="text-button" onClick={downloadCsvTemplate}>Download CSV template</button><button type="button" className="text-button" onClick={() => setProductFormOpen(false)}>Cancel</button><button className="small-button" disabled={productSaving}>{productSaving ? 'Saving...' : 'Add product'}</button></div>
+          </form>
+        </section>
+      </div>}
       {settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
         <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <div className="settings-dialog-header"><div><p className="eyebrow">CONFIGURATION</p><h2 id="settings-title">Shop settings</h2><p>Update the details shown on receipts and across the POS.</p></div><button className="settings-close" onClick={() => setSettingsOpen(false)} aria-label="Close settings"><X size={18} /></button></div>
