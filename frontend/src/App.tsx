@@ -76,6 +76,15 @@ type SaleDetail = SaleRecord & {
     subtotal: string;
   }[];
 };
+type ReturnResult = {
+  return_id: number;
+  sale_id: number;
+  refund_amount: string;
+  refund_method: PaymentMethod;
+  reason: string;
+  created_at: string;
+  items: { sale_item_id: number; quantity: number; refund: number }[];
+};
 type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns';
 type ShopSettings = {
   branch_id: number;
@@ -457,19 +466,25 @@ function App() {
         if (!returnSale) return;
         const items = returnSale.items
           .map(item => ({ sale_item_id: item.sale_item_id, quantity: Number(returnQuantities[item.sale_item_id] || 0) }))
-          .filter(item => item.quantity > 0);
-        if (!items.length || !returnReason.trim()) {
-          setNotice({ type: 'error', text: 'Select at least one item and enter a refund reason.' });
+          .filter(item => Number.isFinite(item.quantity) && item.quantity > 0);
+        if (!items.length) {
+          setNotice({ type: 'error', text: 'Enter a return quantity greater than 0 for at least one item.' });
+          return;
+        }
+        if (!returnReason.trim()) {
+          setNotice({ type: 'error', text: 'Enter a refund reason before recording the return.' });
           return;
         }
         setReturnSubmitting(true);
         try {
-          const response = await api.post<{ data: { refund_amount: string } }>('/returns', {
+          const saleForBill = returnSale;
+          const response = await api.post<{ data: ReturnResult }>('/returns', {
             sale_id: returnSale.sale_id,
             items,
             reason: returnReason.trim(),
           });
           setNotice({ type: 'success', text: `Return recorded. Refund: ${money(Number(response.data.data.refund_amount))}` });
+          printReturnBill(response.data.data, saleForBill);
           await searchReturnReceipt();
         } catch (error) {
           const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
@@ -536,6 +551,10 @@ function App() {
   const total = cart.reduce((sum, item) => sum + Number(item.selling_price) * item.cartQuantity, 0);
   const itemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
   const change = Math.max(0, Number(amountPaid || 0) - total);
+  const selectedReturnTotal = returnSale?.items.reduce(
+    (sum, item) => sum + Math.min(Number(returnQuantities[item.sale_item_id] || 0), item.returnable_quantity) * Number(item.unit_price),
+    0,
+  ) ?? 0;
 
   async function toggleSaleDetails(saleId: number) {
     if (expandedSaleId === saleId) {
@@ -574,6 +593,22 @@ function App() {
     }
     const lines = items.map(item => `<tr><td>${item.name}</td><td>${item.quantity} x ${money(Number(item.unit_price))}</td><td>${money(Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)))}</td></tr>`).join('');
     receiptWindow.document.write(`<html><head><title>Receipt #${saleId}</title><style>body{font-family:Arial,sans-serif;width:320px;margin:20px auto;color:#111}h1{text-align:center;font-size:20px}p{text-align:center;font-size:12px}table{width:100%;font-size:11px;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #ddd}td:last-child{text-align:right}.total{font-weight:bold;font-size:14px}.meta{text-align:left}</style></head><body><h1>${shopSettings?.name ?? 'Supermarket POS'}</h1><p>Receipt #${saleId}<br>${new Date(createdAt).toLocaleString('en-LK')}<br>Cashier: ${cashierName}</p><table>${lines}</table><p class="total">Total: ${money(saleTotal)}<br>Paid: ${money(paid)}<br>Method: ${method}<br>${reference ? `Reference: ${reference}<br>` : ''}Change: ${money(Math.max(0, paid - saleTotal))}</p><p>${shopSettings?.receipt_footer ?? 'Thank you for shopping with us!'}</p></body></html>`);
+    receiptWindow.document.close();
+    receiptWindow.focus();
+    receiptWindow.print();
+  }
+
+  function printReturnBill(returnResult: ReturnResult, sale: ReturnableSale) {
+    const receiptWindow = window.open('', '_blank', 'width=420,height=700');
+    if (!receiptWindow) {
+      setNotice({ type: 'error', text: 'Allow pop-ups to print the return bill.' });
+      return;
+    }
+    const items = returnResult.items.map(returnItem => {
+      const saleItem = sale.items.find(item => item.sale_item_id === returnItem.sale_item_id);
+      return `<tr><td>${saleItem?.name ?? 'Returned item'}</td><td>${returnItem.quantity}</td><td>${money(returnItem.refund)}</td></tr>`;
+    }).join('');
+    receiptWindow.document.write(`<html><head><title>Return #${returnResult.return_id}</title><style>body{font-family:Arial,sans-serif;width:320px;margin:20px auto;color:#111}h1{text-align:center;font-size:20px}p{text-align:center;font-size:12px}table{width:100%;font-size:11px;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #ddd}td:last-child{text-align:right}.total{font-weight:bold;font-size:14px}.reason{text-align:left}</style></head><body><h1>${shopSettings?.name ?? 'Supermarket POS'}</h1><p>Return bill #${returnResult.return_id}<br>Original receipt #${sale.sale_id}<br>${new Date(returnResult.created_at).toLocaleString('en-LK')}<br>Processed by: ${user?.fullName ?? 'Cashier'}</p><table><tr><th>Item</th><th>Qty</th><th>Refund</th></tr>${items}</table><p class="total">Refund total: ${money(Number(returnResult.refund_amount))}<br>Refund method: ${returnResult.refund_method === 'bank_transfer' ? 'Bank transfer' : returnResult.refund_method[0].toUpperCase() + returnResult.refund_method.slice(1)}</p><p class="reason">Reason: ${returnResult.reason}</p><p>${shopSettings?.receipt_footer ?? 'Thank you for shopping with us!'}</p></body></html>`);
     receiptWindow.document.close();
     receiptWindow.focus();
     receiptWindow.print();
@@ -806,10 +841,12 @@ function App() {
                   <div><strong>{item.name}</strong><span>{item.barcode} · {money(Number(item.unit_price))} each</span></div>
                   <span>{item.returnable_quantity} available</span>
                   <input type="number" min="0" max={item.returnable_quantity} step="0.001" value={returnQuantities[item.sale_item_id] ?? ''} disabled={unavailable} onChange={event => setReturnQuantities(current => ({ ...current, [item.sale_item_id]: event.target.value }))} aria-label={`Return quantity for ${item.name}`} placeholder="0" />
+                  {!unavailable && <button type="button" className="text-button return-all-button" onClick={() => setReturnQuantities(current => ({ ...current, [item.sale_item_id]: String(item.returnable_quantity) }))}>All</button>}
                 </div>;
               })}</div>
-              <label className="return-reason">Refund reason<textarea value={returnReason} onChange={event => setReturnReason(event.target.value)} placeholder="Why is the customer returning these items?" maxLength={500} rows={3} /></label>
-              <div className="return-actions"><span>Selected items will be added back to inventory.</span><button className="complete-button" onClick={() => void submitReturn()} disabled={returnSubmitting}>{returnSubmitting ? 'Processing...' : 'Record return & refund'}</button></div>
+              <label className="return-reason">Refund reason<textarea value={returnReason} onChange={event => setReturnReason(event.target.value)} placeholder="Why is the customer returning these items?" maxLength={500} rows={3} required /></label>
+              <div className="return-total"><span>Refund total</span><strong>{money(selectedReturnTotal)}</strong></div>
+              <div className="return-actions"><span>Items will be added back to inventory and refunded using the original payment method.</span><button className="complete-button" onClick={() => void submitReturn()} disabled={returnSubmitting || selectedReturnTotal <= 0}>{returnSubmitting ? 'Processing...' : 'Record return & print bill'}</button></div>
             </div>}
             {!returnLoading && !returnSale && <div className="empty-state">Search by receipt number to begin a return.</div>}
           </section>}

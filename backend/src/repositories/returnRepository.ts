@@ -52,10 +52,11 @@ export async function createReturn(data: AuthorizedReturnInput) {
   try {
     await client.query('BEGIN');
     const saleResult = await client.query(
-      `SELECT sale_id, branch_id, status
-       FROM sales
-       WHERE sale_id = $1 AND branch_id = $2
-       FOR UPDATE`,
+      `SELECT s.sale_id, s.branch_id, s.status, p.payment_method
+       FROM sales s
+       JOIN payments p ON p.sale_id = s.sale_id
+       WHERE s.sale_id = $1 AND s.branch_id = $2
+       FOR UPDATE OF s`,
       [data.sale_id, data.branch_id],
     );
     if (!saleResult.rowCount || saleResult.rows[0].status !== 'completed') {
@@ -99,10 +100,17 @@ export async function createReturn(data: AuthorizedReturnInput) {
 
     refundAmount = Math.round(refundAmount * 100) / 100;
     const returnResult = await client.query(
-      `INSERT INTO returns (sale_id, branch_id, processed_by, refund_amount, reason)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING return_id, sale_id, refund_amount, reason, created_at`,
-      [data.sale_id, data.branch_id, data.processed_by, refundAmount, data.reason],
+      `INSERT INTO returns (sale_id, branch_id, processed_by, refund_amount, refund_method, reason)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING return_id, sale_id, refund_amount, refund_method, reason, created_at`,
+      [
+        data.sale_id,
+        data.branch_id,
+        data.processed_by,
+        refundAmount,
+        saleResult.rows[0].payment_method,
+        data.reason,
+      ],
     );
 
     for (const item of returnItems) {

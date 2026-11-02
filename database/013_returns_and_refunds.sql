@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS returns (
     branch_id BIGINT NOT NULL REFERENCES branches(branch_id),
     processed_by BIGINT NOT NULL REFERENCES users(user_id),
     refund_amount NUMERIC(12,2) NOT NULL CHECK (refund_amount > 0),
+    refund_method VARCHAR(20) NOT NULL
+      CHECK (refund_method IN ('cash', 'card', 'bank_transfer')),
     reason VARCHAR(500) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

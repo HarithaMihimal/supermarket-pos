@@ -25,6 +25,7 @@ export async function createReturn(req: Request, res: Response, next: NextFuncti
     await writeAudit(req, 'return.created', 'sale', result.sale_id, {
       return_id: result.return_id,
       refund_amount: result.refund_amount,
+      refund_method: result.refund_method,
       reason: result.reason,
     });
     res.status(201).json({ success: true, data: result });
