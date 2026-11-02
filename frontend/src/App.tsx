@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from './services/api';
 import {
   Banknote,
+  BarChart3,
   Barcode,
   CheckCircle2,
   CreditCard,
@@ -15,6 +16,8 @@ import {
   Settings,
   ShoppingCart,
   Trash2,
+  TrendingDown,
+  TrendingUp,
   UserRound,
   WalletCards,
   X,
@@ -72,7 +75,7 @@ type SaleDetail = SaleRecord & {
     subtotal: string;
   }[];
 };
-type View = 'checkout' | 'inventory' | 'sales';
+type View = 'dashboard' | 'checkout' | 'inventory' | 'sales';
 type ShopSettings = {
   branch_id: number;
   name: string;
@@ -92,6 +95,13 @@ type ProductForm = {
   selling_price: string;
   initial_quantity: string;
   reorder_level: string;
+};
+type DashboardData = {
+  date: string;
+  summary: { total_sales: string; total_profit: string; transaction_count: number };
+  payments: { cash: string; card: string; bank_transfer: string };
+  low_stock: { product_id: number; name: string; barcode: string; quantity: string; reorder_level: string }[];
+  best_selling: { product_id: number; name: string; barcode: string; quantity_sold: string; sales_amount: string }[];
 };
 
 const parseAmount = (value: string) => {
@@ -128,6 +138,8 @@ function App() {
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [view, setView] = useState<View>('checkout');
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -390,8 +402,27 @@ function App() {
         setNotice({ type: 'error', text: 'Could not load sales history.' });
       } finally {
         setSalesLoading(false);
+      }
+    }
+
+  async function refreshDashboard() {
+    setDashboardLoading(true);
+    try {
+      const response = await api.get<{ data: DashboardData }>('/dashboard');
+      setDashboard(response.data.data);
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load dashboard.' });
+    } finally {
+      setDashboardLoading(false);
     }
   }
+
+  useEffect(() => {
+    // Dashboard data is refreshed whenever its view becomes active.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (view === 'dashboard') void refreshDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   useEffect(() => {
     if (!user) return;
@@ -592,6 +623,7 @@ function App() {
       <div className="layout">
         <aside className="sidebar">
           <nav>
+            <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><BarChart3 size={18} /> Dashboard</button>
             <button className={`nav-item ${view === 'checkout' ? 'active' : ''}`} onClick={() => setView('checkout')}><LayoutDashboard size={18} /> Checkout</button>
             <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
@@ -600,10 +632,21 @@ function App() {
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">{view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : 'REPORTING'}</p><h1>{view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
-          {view === 'checkout' ? <section className="catalog-panel panel">
+          {view === 'dashboard' ? <section className="dashboard-content">
+            {dashboardLoading && <div className="panel dashboard-empty">Loading dashboard...</div>}
+            {!dashboardLoading && dashboard && <><div className="dashboard-cards">
+              <div className="dashboard-card"><span className="dashboard-card-icon sales"><TrendingUp size={18} /></span><div><span>Today's sales</span><strong>{money(Number(dashboard.summary.total_sales))}</strong></div></div>
+              <div className="dashboard-card"><span className="dashboard-card-icon profit"><BarChart3 size={18} /></span><div><span>Today's profit</span><strong>{money(Number(dashboard.summary.total_profit))}</strong></div></div>
+              <div className="dashboard-card"><span className="dashboard-card-icon transactions"><Receipt size={18} /></span><div><span>Transactions</span><strong>{dashboard.summary.transaction_count}</strong></div></div>
+            </div><div className="dashboard-grid">
+              <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Payment totals</h2><p>Collected today by payment method</p></div><button className="icon-button" onClick={() => void refreshDashboard()} aria-label="Refresh dashboard"><RefreshCw size={16} /></button></div><div className="payment-total-list"><div><Banknote size={18} /><span>Cash</span><strong>{money(Number(dashboard.payments.cash))}</strong></div><div><CreditCard size={18} /><span>Card</span><strong>{money(Number(dashboard.payments.card))}</strong></div><div><WalletCards size={18} /><span>Bank transfer</span><strong>{money(Number(dashboard.payments.bank_transfer))}</strong></div></div></section>
+              <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Low-stock products</h2><p>Items at or below reorder level</p></div><TrendingDown size={18} className="dashboard-warning" /></div>{!dashboard.low_stock.length ? <div className="dashboard-list-empty">All products are sufficiently stocked.</div> : <div className="dashboard-list">{dashboard.low_stock.map(item => <div key={item.product_id}><div><strong>{item.name}</strong><span>{item.barcode}</span></div><b className="dashboard-stock-warning">{item.quantity} / {item.reorder_level}</b></div>)}</div>}</section>
+              <section className="panel dashboard-panel dashboard-best-selling"><div className="panel-heading"><div><h2>Best-selling products</h2><p>Top products sold today</p></div><TrendingUp size={18} className="dashboard-success" /></div>{!dashboard.best_selling.length ? <div className="dashboard-list-empty">No sales recorded today.</div> : <div className="dashboard-list">{dashboard.best_selling.map((item, index) => <div key={item.product_id}><div><strong><span className="rank">{index + 1}</span>{item.name}</strong><span>{money(Number(item.sales_amount))} in sales</span></div><b>{item.quantity_sold} sold</b></div>)}</div>}</section>
+            </div></>}
+          </section> : view === 'checkout' ? <section className="catalog-panel panel">
             <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><div className="catalog-actions"><span className="product-count">{filteredProducts.length} products</span>{canManageProducts() && <><button className="small-button" onClick={() => setProductFormOpen(true)}>Manual add</button><button className="small-button secondary-button" onClick={() => setCsvPortalOpen(true)}>Upload CSV</button></>}</div></div>
             <div className="catalog-controls">
               <div className="search-box"><Search size={18} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name or scan barcode..." /><Barcode size={18} className="muted-icon" /></div>
