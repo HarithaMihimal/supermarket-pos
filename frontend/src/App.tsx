@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Receipt,
+  RotateCcw,
   Search,
   Settings,
   ShoppingCart,
@@ -75,7 +76,7 @@ type SaleDetail = SaleRecord & {
     subtotal: string;
   }[];
 };
-type View = 'dashboard' | 'checkout' | 'inventory' | 'sales';
+type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns';
 type ShopSettings = {
   branch_id: number;
   name: string;
@@ -102,6 +103,25 @@ type DashboardData = {
   payments: { cash: string; card: string; bank_transfer: string };
   low_stock: { product_id: number; name: string; barcode: string; quantity: string; reorder_level: string }[];
   best_selling: { product_id: number; name: string; barcode: string; quantity_sold: string; sales_amount: string }[];
+};
+type ReturnableSale = {
+  sale_id: number;
+  total_amount: string;
+  status: string;
+  created_at: string;
+  cashier: string;
+  payment_method: PaymentMethod;
+  items: {
+    sale_item_id: number;
+    product_id: number;
+    name: string;
+    barcode: string;
+    sold_quantity: string;
+    returned_quantity: string;
+    returnable_quantity: number;
+    unit_price: string;
+    subtotal: string;
+  }[];
 };
 
 const parseAmount = (value: string) => {
@@ -147,6 +167,12 @@ function App() {
   const [salesSearch, setSalesSearch] = useState('');
   const [salesPaymentMethod, setSalesPaymentMethod] = useState<'all' | PaymentMethod>('all');
   const [salesLoading, setSalesLoading] = useState(false);
+  const [returnReceiptId, setReturnReceiptId] = useState('');
+  const [returnSale, setReturnSale] = useState<ReturnableSale | null>(null);
+  const [returnQuantities, setReturnQuantities] = useState<Record<number, string>>({});
+  const [returnReason, setReturnReason] = useState('');
+  const [returnLoading, setReturnLoading] = useState(false);
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null);
   const [saleDetails, setSaleDetails] = useState<Record<number, SaleDetail>>({});
   const [saleDetailLoading, setSaleDetailLoading] = useState<number | null>(null);
@@ -405,6 +431,55 @@ function App() {
       }
     }
 
+  async function searchReturnReceipt(event?: FormEvent<HTMLFormElement>) {
+        event?.preventDefault();
+        const receiptId = Number(returnReceiptId);
+        if (!Number.isInteger(receiptId) || receiptId <= 0) {
+          setNotice({ type: 'error', text: 'Enter a valid receipt number.' });
+          return;
+        }
+        setReturnLoading(true);
+        setReturnSale(null);
+        try {
+          const response = await api.get<{ data: ReturnableSale }>(`/returns/receipts/${receiptId}`);
+          setReturnSale(response.data.data);
+          setReturnQuantities({});
+          setReturnReason('');
+        } catch (error) {
+          const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+          setNotice({ type: 'error', text: message ?? 'Could not find that receipt.' });
+        } finally {
+          setReturnLoading(false);
+        }
+      }
+
+  async function submitReturn() {
+        if (!returnSale) return;
+        const items = returnSale.items
+          .map(item => ({ sale_item_id: item.sale_item_id, quantity: Number(returnQuantities[item.sale_item_id] || 0) }))
+          .filter(item => item.quantity > 0);
+        if (!items.length || !returnReason.trim()) {
+          setNotice({ type: 'error', text: 'Select at least one item and enter a refund reason.' });
+          return;
+        }
+        setReturnSubmitting(true);
+        try {
+          const response = await api.post<{ data: { refund_amount: string } }>('/returns', {
+            sale_id: returnSale.sale_id,
+            items,
+            reason: returnReason.trim(),
+          });
+          setNotice({ type: 'success', text: `Return recorded. Refund: ${money(Number(response.data.data.refund_amount))}` });
+          await searchReturnReceipt();
+        } catch (error) {
+          const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
+          const validationError = responseData?.errors?.[0];
+          setNotice({ type: 'error', text: validationError ? `${validationError.field}: ${validationError.message}` : responseData?.message ?? 'Could not record return.' });
+        } finally {
+          setReturnSubmitting(false);
+        }
+      }
+
   async function refreshDashboard() {
     setDashboardLoading(true);
     try {
@@ -627,12 +702,13 @@ function App() {
             <button className={`nav-item ${view === 'checkout' ? 'active' : ''}`} onClick={() => setView('checkout')}><LayoutDashboard size={18} /> Checkout</button>
             <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
+            <button className={`nav-item ${view === 'returns' ? 'active' : ''}`} onClick={() => setView('returns')}><RotateCcw size={18} /> Returns</button>
           </nav>
           <div className="sidebar-footer">v1.0.0 <span>●</span> System online</div>
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
           {view === 'dashboard' ? <section className="dashboard-content">
@@ -686,7 +762,7 @@ function App() {
                 </div> : <button className="small-button" onClick={() => { setAdjustingProductId(item.product_id); setAdjustment('1'); }}>Adjust stock</button>}
               </div>)}
             </div>
-          </section> : <section className="catalog-panel panel sales-panel">
+          </section> : view === 'sales' ? <section className="catalog-panel panel sales-panel">
             <div className="panel-heading"><div><h2>Completed transactions</h2><p>Review cash payments and daily sales activity</p></div><button className="icon-button" onClick={() => void refreshSales()} aria-label="Refresh sales history"><RefreshCw size={16} /></button></div>
             <div className="catalog-controls">
               <div className="search-box"><Search size={18} /><input value={salesSearch} onChange={event => setSalesSearch(event.target.value)} placeholder="Search sale number or cashier..." /></div>
@@ -716,6 +792,26 @@ function App() {
                 </div>;
               })}
             </div>
+          </section> : <section className="catalog-panel panel returns-panel">
+            <div className="panel-heading"><div><h2>Find a receipt</h2><p>Search a completed receipt to return selected items and restore stock</p></div><RotateCcw size={20} className="dashboard-success" /></div>
+            <form className="return-search" onSubmit={event => void searchReturnReceipt(event)}>
+              <div className="search-box"><Receipt size={18} /><input value={returnReceiptId} onChange={event => setReturnReceiptId(event.target.value)} inputMode="numeric" placeholder="Enter receipt number..." /></div>
+              <button className="small-button" disabled={returnLoading}>{returnLoading ? 'Searching...' : 'Search receipt'}</button>
+            </form>
+            {returnSale && <div className="return-receipt">
+              <div className="return-receipt-header"><div><strong>Receipt #{returnSale.sale_id}</strong><span>{new Date(returnSale.created_at).toLocaleString('en-LK')} · {returnSale.cashier}</span></div><span className="payment-badge">{returnSale.payment_method === 'bank_transfer' ? 'Transfer' : returnSale.payment_method}</span></div>
+              <div className="return-items">{returnSale.items.map(item => {
+                const unavailable = item.returnable_quantity <= 0;
+                return <div className={`return-item ${unavailable ? 'unavailable' : ''}`} key={item.sale_item_id}>
+                  <div><strong>{item.name}</strong><span>{item.barcode} · {money(Number(item.unit_price))} each</span></div>
+                  <span>{item.returnable_quantity} available</span>
+                  <input type="number" min="0" max={item.returnable_quantity} step="0.001" value={returnQuantities[item.sale_item_id] ?? ''} disabled={unavailable} onChange={event => setReturnQuantities(current => ({ ...current, [item.sale_item_id]: event.target.value }))} aria-label={`Return quantity for ${item.name}`} placeholder="0" />
+                </div>;
+              })}</div>
+              <label className="return-reason">Refund reason<textarea value={returnReason} onChange={event => setReturnReason(event.target.value)} placeholder="Why is the customer returning these items?" maxLength={500} rows={3} /></label>
+              <div className="return-actions"><span>Selected items will be added back to inventory.</span><button className="complete-button" onClick={() => void submitReturn()} disabled={returnSubmitting}>{returnSubmitting ? 'Processing...' : 'Record return & refund'}</button></div>
+            </div>}
+            {!returnLoading && !returnSale && <div className="empty-state">Search by receipt number to begin a return.</div>}
           </section>}
         </main>
 
