@@ -16,6 +16,7 @@ import { authenticate } from './middleware/auth';
 import { runMigrations } from './config/migrations';
 import dashboardRoutes from './routes/dashboardRoutes';
 import returnRoutes from './routes/returnRoutes';
+import purchaseRoutes from './routes/purchaseRoutes';
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/settings', authenticate, settingsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/returns', returnRoutes);
+app.use('/api/purchases', purchaseRoutes);
 
 app.use(errorHandler);
 

@@ -17,6 +17,7 @@ import {
   Settings,
   ShoppingCart,
   Trash2,
+  Truck,
   TrendingDown,
   TrendingUp,
   UserRound,
@@ -30,6 +31,7 @@ type Product = {
   name: string;
   barcode: string;
   selling_price: string;
+  cost_price: string;
   category: string | null;
   category_id: number | null;
   quantity: string;
@@ -85,7 +87,16 @@ type ReturnResult = {
   created_at: string;
   items: { sale_item_id: number; quantity: number; refund: number }[];
 };
-type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns';
+type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns' | 'purchases';
+type Supplier = { supplier_id: number; name: string; contact_name: string | null; email: string | null; phone: string | null };
+type PurchaseOrder = {
+  purchase_order_id: number; supplier_name: string; status: string; order_date: string;
+  expected_date: string | null; total_cost: string; item_quantity: string; received_quantity: string;
+};
+type PurchaseOrderDetail = PurchaseOrder & {
+  items: { purchase_order_item_id: number; product_id: number; product_name: string; barcode: string;
+    ordered_quantity: string; received_quantity: string; remaining_quantity: number; unit_cost: string }[];
+};
 type ShopSettings = {
   branch_id: number;
   name: string;
@@ -206,6 +217,16 @@ function App() {
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvPortalOpen, setCsvPortalOpen] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState<PurchaseOrderDetail | null>(null);
+  const [purchaseSupplier, setPurchaseSupplier] = useState('');
+  const [purchaseProduct, setPurchaseProduct] = useState('');
+  const [purchaseQuantity, setPurchaseQuantity] = useState('1');
+  const [purchaseUnitCost, setPurchaseUnitCost] = useState('');
+  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', email: '', phone: '' });
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [receiving, setReceiving] = useState<Record<number, string>>({});
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -261,6 +282,7 @@ function App() {
       category_id: product.category_id === null ? null : Number(product.category_id),
       quantity: String(product.quantity),
       selling_price: String(product.selling_price),
+      cost_price: String(product.cost_price),
     })));
     setCategories(categoryResponse.data.data.map(item => ({
       ...item,
@@ -270,6 +292,95 @@ function App() {
 
   function canManageProducts() {
     return user?.role === 'admin' || user?.role === 'manager';
+  }
+
+  async function refreshPurchases() {
+    setPurchaseLoading(true);
+    try {
+      const [supplierResponse, orderResponse] = await Promise.all([
+        api.get<{ data: Supplier[] }>('/purchases/suppliers'),
+        api.get<{ data: PurchaseOrder[] }>('/purchases/orders'),
+      ]);
+      setSuppliers(supplierResponse.data.data.map(item => ({ ...item, supplier_id: Number(item.supplier_id) })));
+      setPurchaseOrders(orderResponse.data.data.map(item => ({
+        ...item,
+        purchase_order_id: Number(item.purchase_order_id),
+        total_cost: String(item.total_cost),
+        item_quantity: String(item.item_quantity),
+        received_quantity: String(item.received_quantity),
+      })));
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load purchasing data.' });
+    } finally {
+      setPurchaseLoading(false);
+    }
+  }
+
+  async function saveSupplier(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const response = await api.post<{ data: Supplier }>('/purchases/suppliers', supplierForm);
+      setSuppliers(current => [...current, response.data.data].sort((a, b) => a.name.localeCompare(b.name)));
+      setPurchaseSupplier(String(response.data.data.supplier_id));
+      setSupplierForm({ name: '', contact_name: '', email: '', phone: '' });
+      setNotice({ type: 'success', text: 'Supplier saved.' });
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not save supplier.' });
+    }
+  }
+
+  async function savePurchaseOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!purchaseSupplier || !purchaseProduct) {
+      setNotice({ type: 'error', text: 'Select a supplier and product.' });
+      return;
+    }
+    try {
+      await api.post('/purchases/orders', {
+        supplier_id: Number(purchaseSupplier),
+        items: [{ product_id: Number(purchaseProduct), ordered_quantity: Number(purchaseQuantity), unit_cost: Number(purchaseUnitCost) }],
+      });
+      setNotice({ type: 'success', text: 'Purchase order created.' });
+      setPurchaseProduct('');
+      setPurchaseQuantity('1');
+      setPurchaseUnitCost('');
+      await refreshPurchases();
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not create purchase order.' });
+    }
+  }
+
+  async function openPurchaseOrder(id: number) {
+    try {
+      const response = await api.get<{ data: PurchaseOrderDetail }>(`/purchases/orders/${id}`);
+      setSelectedPurchaseOrder(response.data.data);
+      setReceiving(Object.fromEntries(response.data.data.items.map(item => [item.purchase_order_item_id, item.remaining_quantity > 0 ? String(item.remaining_quantity) : '0'])));
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load purchase order.' });
+    }
+  }
+
+  async function receivePurchaseOrder() {
+    if (!selectedPurchaseOrder) return;
+    const items = selectedPurchaseOrder.items.map(item => ({
+      purchase_order_item_id: item.purchase_order_item_id,
+      quantity: Number(receiving[item.purchase_order_item_id] || 0),
+    })).filter(item => item.quantity > 0);
+    if (!items.length) {
+      setNotice({ type: 'error', text: 'Enter at least one quantity to receive.' });
+      return;
+    }
+    try {
+      await api.post(`/purchases/orders/${selectedPurchaseOrder.purchase_order_id}/receive`, { items });
+      setNotice({ type: 'success', text: 'Goods received and inventory updated.' });
+      setSelectedPurchaseOrder(null);
+      await Promise.all([refreshPurchases(), refreshInventory(), refreshCatalog()]);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not receive goods.' });
+    }
   }
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
@@ -537,6 +648,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, salesSearch, salesPaymentMethod]);
 
+  useEffect(() => {
+    // Purchasing data is synchronized when its workspace becomes active.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (view === 'purchases') void refreshPurchases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase().trim();
     return products.filter(product => {
@@ -738,15 +856,24 @@ function App() {
             <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
             <button className={`nav-item ${view === 'returns' ? 'active' : ''}`} onClick={() => setView('returns')}><RotateCcw size={18} /> Returns</button>
+            {canManageProducts() && <button className={`nav-item ${view === 'purchases' ? 'active' : ''}`} onClick={() => setView('purchases')}><Truck size={18} /> Purchasing</button>}
           </nav>
           <div className="sidebar-footer">v1.0.0 <span>●</span> System online</div>
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : view === 'purchases' ? 'SUPPLY CHAIN' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : view === 'purchases' ? 'Supplier & purchasing' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
-          {view === 'dashboard' ? <section className="dashboard-content">
+          {view === 'purchases' ? <section className="catalog-panel panel">
+            <div className="panel-heading"><div><h2>Supplier records</h2><p>Maintain suppliers and track purchase costs</p></div><button className="icon-button" onClick={() => void refreshPurchases()} aria-label="Refresh purchasing"><RefreshCw size={16} /></button></div>
+            {purchaseLoading && <div className="dashboard-empty">Loading purchasing data...</div>}
+            {!purchaseLoading && <><form className="catalog-controls" onSubmit={event => void saveSupplier(event)}><input placeholder="Supplier name" value={supplierForm.name} onChange={event => setSupplierForm({ ...supplierForm, name: event.target.value })} required /><input placeholder="Contact name" value={supplierForm.contact_name} onChange={event => setSupplierForm({ ...supplierForm, contact_name: event.target.value })} /><input placeholder="Phone" value={supplierForm.phone} onChange={event => setSupplierForm({ ...supplierForm, phone: event.target.value })} /><button className="small-button">Add supplier</button></form>
+              <form className="catalog-controls" onSubmit={event => void savePurchaseOrder(event)}><select value={purchaseSupplier} onChange={event => setPurchaseSupplier(event.target.value)} required><option value="">Supplier</option>{suppliers.map(supplier => <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.name}</option>)}</select><select value={purchaseProduct} onChange={event => { setPurchaseProduct(event.target.value); const product = products.find(item => item.product_id === Number(event.target.value)); setPurchaseUnitCost(product?.cost_price ?? ''); }} required><option value="">Product</option>{products.map(product => <option key={product.product_id} value={product.product_id}>{product.name}</option>)}</select><input type="number" min="0.001" step="0.001" value={purchaseQuantity} onChange={event => setPurchaseQuantity(event.target.value)} aria-label="Order quantity" /><input type="number" min="0" step="0.01" value={purchaseUnitCost} onChange={event => setPurchaseUnitCost(event.target.value)} placeholder="Unit cost" aria-label="Unit cost" required /><button className="small-button">Create purchase order</button></form>
+              <div className="inventory-list">{purchaseOrders.map(order => <div className="inventory-row" key={order.purchase_order_id}><div><strong>PO #{order.purchase_order_id} · {order.supplier_name}</strong><span>{order.status} · {order.item_quantity} units · {money(Number(order.total_cost))}</span></div><div className="stock-value"><strong>{order.received_quantity} received</strong><span>{order.order_date}</span></div><button className="small-button" onClick={() => void openPurchaseOrder(order.purchase_order_id)}>View / receive</button></div>)}{!purchaseOrders.length && <div className="empty-state">No purchase orders yet.</div>}</div>
+              {selectedPurchaseOrder && <div className="panel" style={{ marginTop: 18, padding: 18 }}><div className="panel-heading"><div><h2>Receive PO #{selectedPurchaseOrder.purchase_order_id}</h2><p>{selectedPurchaseOrder.supplier_name}</p></div><button className="text-button" onClick={() => setSelectedPurchaseOrder(null)}>Close</button></div>{selectedPurchaseOrder.items.map(item => <div className="inventory-row" key={item.purchase_order_item_id}><div><strong>{item.product_name}</strong><span>{item.ordered_quantity} ordered · {item.remaining_quantity} remaining · {money(Number(item.unit_cost))} each</span></div><input type="number" min="0" max={item.remaining_quantity} step="0.001" value={receiving[item.purchase_order_item_id] ?? '0'} onChange={event => setReceiving(current => ({ ...current, [item.purchase_order_item_id]: event.target.value }))} aria-label={`Receive ${item.product_name}`} /><span /><button className="small-button" onClick={() => void receivePurchaseOrder()}>Receive goods</button></div>)}</div>}
+            </>}
+          </section> : view === 'dashboard' ? <section className="dashboard-content">
             {dashboardLoading && <div className="panel dashboard-empty">Loading dashboard...</div>}
             {!dashboardLoading && dashboard && <><div className="dashboard-cards">
               <div className="dashboard-card"><span className="dashboard-card-icon sales"><TrendingUp size={18} /></span><div><span>Today's sales</span><strong>{money(Number(dashboard.summary.total_sales))}</strong></div></div>

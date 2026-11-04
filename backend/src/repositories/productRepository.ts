@@ -17,7 +17,7 @@ export async function listProducts(search?: string, categoryId?: number) {
   }
 
   const result = await pool.query(`
-    SELECT p.product_id, p.name, p.barcode, p.selling_price, p.is_new,
+    SELECT p.product_id, p.name, p.barcode, p.cost_price, p.selling_price, p.is_new,
            c.category_id, c.name AS category, COALESCE(i.quantity, 0) AS quantity
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.category_id
