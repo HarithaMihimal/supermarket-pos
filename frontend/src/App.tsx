@@ -318,6 +318,10 @@ function App() {
 
   async function saveSupplier(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    if (!supplierForm.name.trim()) {
+      setNotice({ type: 'error', text: 'Enter a supplier name before adding the supplier.' });
+      return;
+    }
     try {
       const response = await api.post<{ data: Supplier }>('/purchases/suppliers', supplierForm);
       const supplier = { ...response.data.data, supplier_id: Number(response.data.data.supplier_id) };
@@ -1041,7 +1045,7 @@ function App() {
               <label className="settings-wide">Receipt footer<textarea value={shopSettings.receipt_footer} onChange={event => setShopSettings({ ...shopSettings, receipt_footer: event.target.value })} rows={2} /></label>
             </div></div>
             {canManageProducts() && <div className="settings-section"><h3>Supplier records</h3><div className="settings-grid">
-              <label>Supplier name<input value={supplierForm.name} onChange={event => setSupplierForm({ ...supplierForm, name: event.target.value })} required /></label>
+              <label>Supplier name<input value={supplierForm.name} onChange={event => setSupplierForm({ ...supplierForm, name: event.target.value })} /></label>
               <label>Contact name<input value={supplierForm.contact_name} onChange={event => setSupplierForm({ ...supplierForm, contact_name: event.target.value })} /></label>
               <label>Email<input type="email" value={supplierForm.email} onChange={event => setSupplierForm({ ...supplierForm, email: event.target.value })} /></label>
               <label>Phone<input value={supplierForm.phone} onChange={event => setSupplierForm({ ...supplierForm, phone: event.target.value })} /></label>
