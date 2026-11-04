@@ -2,9 +2,12 @@
 
 ## Supplier and purchasing management
 
-Managers and administrators can use the **Purchasing** workspace to:
+Managers and administrators can use the **Configuration** portal (the gear button) to:
 
-- maintain supplier records;
+- add and review supplier records.
+
+Those suppliers immediately appear in the **Purchasing** workspace, where managers and administrators can:
+
 - create purchase orders with product quantities and unit costs;
 - receive goods fully or partially against an order;
 - update branch inventory and receipt movements transactionally; and

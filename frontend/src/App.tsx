@@ -316,12 +316,13 @@ function App() {
     }
   }
 
-  async function saveSupplier(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveSupplier(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
     try {
       const response = await api.post<{ data: Supplier }>('/purchases/suppliers', supplierForm);
-      setSuppliers(current => [...current, response.data.data].sort((a, b) => a.name.localeCompare(b.name)));
-      setPurchaseSupplier(String(response.data.data.supplier_id));
+      const supplier = { ...response.data.data, supplier_id: Number(response.data.data.supplier_id) };
+      setSuppliers(current => [...current, supplier].sort((a, b) => a.name.localeCompare(b.name)));
+      setPurchaseSupplier(String(supplier.supplier_id));
       setSupplierForm({ name: '', contact_name: '', email: '', phone: '' });
       setNotice({ type: 'success', text: 'Supplier saved.' });
     } catch (error) {
@@ -459,12 +460,19 @@ function App() {
     setSettingsOpen(true);
     setSettingsLoading(true);
     try {
-      const response = await api.get<{ data: ShopSettings }>('/settings');
+      const [settingsResponse, suppliersResponse] = await Promise.all([
+        api.get<{ data: ShopSettings }>('/settings'),
+        api.get<{ data: Supplier[] }>('/purchases/suppliers'),
+      ]);
       setShopSettings({
-        ...response.data.data,
-        branch_id: Number(response.data.data.branch_id),
-        default_reorder_level: Number(response.data.data.default_reorder_level),
+        ...settingsResponse.data.data,
+        branch_id: Number(settingsResponse.data.data.branch_id),
+        default_reorder_level: Number(settingsResponse.data.data.default_reorder_level),
       });
+      setSuppliers(suppliersResponse.data.data.map(item => ({
+        ...item,
+        supplier_id: Number(item.supplier_id),
+      })));
     } catch (error) {
       const responseData = (error as {
         response?: { data?: { message?: string } };
@@ -868,8 +876,7 @@ function App() {
           {view === 'purchases' ? <section className="catalog-panel panel">
             <div className="panel-heading"><div><h2>Supplier records</h2><p>Maintain suppliers and track purchase costs</p></div><button className="icon-button" onClick={() => void refreshPurchases()} aria-label="Refresh purchasing"><RefreshCw size={16} /></button></div>
             {purchaseLoading && <div className="dashboard-empty">Loading purchasing data...</div>}
-            {!purchaseLoading && <><form className="catalog-controls" onSubmit={event => void saveSupplier(event)}><input placeholder="Supplier name" value={supplierForm.name} onChange={event => setSupplierForm({ ...supplierForm, name: event.target.value })} required /><input placeholder="Contact name" value={supplierForm.contact_name} onChange={event => setSupplierForm({ ...supplierForm, contact_name: event.target.value })} /><input placeholder="Phone" value={supplierForm.phone} onChange={event => setSupplierForm({ ...supplierForm, phone: event.target.value })} /><button className="small-button">Add supplier</button></form>
-              <form className="catalog-controls" onSubmit={event => void savePurchaseOrder(event)}><select value={purchaseSupplier} onChange={event => setPurchaseSupplier(event.target.value)} required><option value="">Supplier</option>{suppliers.map(supplier => <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.name}</option>)}</select><select value={purchaseProduct} onChange={event => { setPurchaseProduct(event.target.value); const product = products.find(item => item.product_id === Number(event.target.value)); setPurchaseUnitCost(product?.cost_price ?? ''); }} required><option value="">Product</option>{products.map(product => <option key={product.product_id} value={product.product_id}>{product.name}</option>)}</select><input type="number" min="0.001" step="0.001" value={purchaseQuantity} onChange={event => setPurchaseQuantity(event.target.value)} aria-label="Order quantity" /><input type="number" min="0" step="0.01" value={purchaseUnitCost} onChange={event => setPurchaseUnitCost(event.target.value)} placeholder="Unit cost" aria-label="Unit cost" required /><button className="small-button">Create purchase order</button></form>
+            {!purchaseLoading && <><form className="catalog-controls" onSubmit={event => void savePurchaseOrder(event)}><select value={purchaseSupplier} onChange={event => setPurchaseSupplier(event.target.value)} required><option value="">Supplier</option>{suppliers.map(supplier => <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.name}</option>)}</select><select value={purchaseProduct} onChange={event => { setPurchaseProduct(event.target.value); const product = products.find(item => item.product_id === Number(event.target.value)); setPurchaseUnitCost(product?.cost_price ?? ''); }} required><option value="">Product</option>{products.map(product => <option key={product.product_id} value={product.product_id}>{product.name}</option>)}</select><input type="number" min="0.001" step="0.001" value={purchaseQuantity} onChange={event => setPurchaseQuantity(event.target.value)} aria-label="Order quantity" /><input type="number" min="0" step="0.01" value={purchaseUnitCost} onChange={event => setPurchaseUnitCost(event.target.value)} placeholder="Unit cost" aria-label="Unit cost" required /><button className="small-button">Create purchase order</button></form>
               <div className="inventory-list">{purchaseOrders.map(order => <div className="inventory-row" key={order.purchase_order_id}><div><strong>PO #{order.purchase_order_id} · {order.supplier_name}</strong><span>{order.status} · {order.item_quantity} units · {money(Number(order.total_cost))}</span></div><div className="stock-value"><strong>{order.received_quantity} received</strong><span>{order.order_date}</span></div><button className="small-button" onClick={() => void openPurchaseOrder(order.purchase_order_id)}>View / receive</button></div>)}{!purchaseOrders.length && <div className="empty-state">No purchase orders yet.</div>}</div>
               {selectedPurchaseOrder && <div className="panel" style={{ marginTop: 18, padding: 18 }}><div className="panel-heading"><div><h2>Receive PO #{selectedPurchaseOrder.purchase_order_id}</h2><p>{selectedPurchaseOrder.supplier_name}</p></div><button className="text-button" onClick={() => setSelectedPurchaseOrder(null)}>Close</button></div>{selectedPurchaseOrder.items.map(item => <div className="inventory-row" key={item.purchase_order_item_id}><div><strong>{item.product_name}</strong><span>{item.ordered_quantity} ordered · {item.remaining_quantity} remaining · {money(Number(item.unit_cost))} each</span></div><input type="number" min="0" max={item.remaining_quantity} step="0.001" value={receiving[item.purchase_order_item_id] ?? '0'} onChange={event => setReceiving(current => ({ ...current, [item.purchase_order_item_id]: event.target.value }))} aria-label={`Receive ${item.product_name}`} /><span /><button className="small-button" onClick={() => void receivePurchaseOrder()}>Receive goods</button></div>)}</div>}
             </>}
@@ -1033,6 +1040,14 @@ function App() {
               <label>Default reorder level<input type="number" min="0" step="0.001" value={shopSettings.default_reorder_level} onChange={event => setShopSettings({ ...shopSettings, default_reorder_level: Number(event.target.value) })} required /></label>
               <label className="settings-wide">Receipt footer<textarea value={shopSettings.receipt_footer} onChange={event => setShopSettings({ ...shopSettings, receipt_footer: event.target.value })} rows={2} /></label>
             </div></div>
+            {canManageProducts() && <div className="settings-section"><h3>Supplier records</h3><div className="settings-grid">
+              <label>Supplier name<input value={supplierForm.name} onChange={event => setSupplierForm({ ...supplierForm, name: event.target.value })} required /></label>
+              <label>Contact name<input value={supplierForm.contact_name} onChange={event => setSupplierForm({ ...supplierForm, contact_name: event.target.value })} /></label>
+              <label>Email<input type="email" value={supplierForm.email} onChange={event => setSupplierForm({ ...supplierForm, email: event.target.value })} /></label>
+              <label>Phone<input value={supplierForm.phone} onChange={event => setSupplierForm({ ...supplierForm, phone: event.target.value })} /></label>
+              <div className="settings-wide supplier-records">{suppliers.length ? suppliers.map(supplier => <div className="supplier-record" key={supplier.supplier_id}><strong>{supplier.name}</strong><span>{supplier.contact_name || supplier.phone || supplier.email || 'No contact details'}</span></div>) : <span className="settings-hint">No suppliers added yet.</span>}</div>
+              <div className="settings-wide settings-actions"><button type="button" className="small-button" onClick={() => void saveSupplier()}>Add supplier</button></div>
+            </div></div>}
             <div className="settings-actions"><button type="button" className="text-button" onClick={() => setSettingsOpen(false)}>Cancel</button><button type="submit" className="small-button" disabled={settingsSaving}>{settingsSaving ? 'Saving...' : 'Save changes'}</button></div>
           </form>}
         </section>
