@@ -110,8 +110,10 @@ type PurchaseOrder = {
   expected_date: string | null; total_cost: string; item_quantity: string; received_quantity: string;
 };
 type PurchaseOrderDetail = PurchaseOrder & {
-  items: { purchase_order_item_id: number; product_id: number; product_name: string; barcode: string;
-    ordered_quantity: string; received_quantity: string; remaining_quantity: number; unit_cost: string }[];
+  items: {
+    purchase_order_item_id: number; product_id: number; product_name: string; barcode: string;
+    ordered_quantity: string; received_quantity: string; remaining_quantity: number; unit_cost: string
+  }[];
 };
 type ShopSettings = {
   branch_id: number;
@@ -276,26 +278,26 @@ function App() {
   }
 
   async function signup(event: FormEvent<HTMLFormElement>) {
-      event.preventDefault();
-      if (signupPassword !== signupConfirmPassword) {
-        setNotice({ type: 'error', text: 'Passwords do not match.' });
-        return;
-      }
-      setLoginLoading(true);
-      try {
-        const response = await api.post<{ data: { token: string; user: User } }>('/auth/signup', {
-          full_name: signupName,
-          email: signupEmail,
-          password: signupPassword,
-        });
-        localStorage.setItem('pos_token', response.data.data.token);
-        localStorage.setItem('pos_user', JSON.stringify(response.data.data.user));
-        setUser(response.data.data.user);
-      } catch (error) {
-        const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
-        setNotice({ type: 'error', text: message ?? 'Could not create the account.' });
-      } finally {
-        setLoginLoading(false);
+    event.preventDefault();
+    if (signupPassword !== signupConfirmPassword) {
+      setNotice({ type: 'error', text: 'Passwords do not match.' });
+      return;
+    }
+    setLoginLoading(true);
+    try {
+      const response = await api.post<{ data: { token: string; user: User } }>('/auth/signup', {
+        full_name: signupName,
+        email: signupEmail,
+        password: signupPassword,
+      });
+      localStorage.setItem('pos_token', response.data.data.token);
+      localStorage.setItem('pos_user', JSON.stringify(response.data.data.user));
+      setUser(response.data.data.user);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not create the account.' });
+    } finally {
+      setLoginLoading(false);
     }
   }
 
@@ -575,76 +577,76 @@ function App() {
   }
 
   async function refreshSales() {
-      setSalesLoading(true);
-      try {
-        const response = await api.get<{ data: SaleRecord[] }>('/sales', {
-          params: {
-            search: salesSearch || undefined,
-            payment_method: salesPaymentMethod,
-          },
-        });
-        setSales(response.data.data);
-      } catch {
-        setNotice({ type: 'error', text: 'Could not load sales history.' });
-      } finally {
-        setSalesLoading(false);
-      }
+    setSalesLoading(true);
+    try {
+      const response = await api.get<{ data: SaleRecord[] }>('/sales', {
+        params: {
+          search: salesSearch || undefined,
+          payment_method: salesPaymentMethod,
+        },
+      });
+      setSales(response.data.data);
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load sales history.' });
+    } finally {
+      setSalesLoading(false);
     }
+  }
 
   async function searchReturnReceipt(event?: FormEvent<HTMLFormElement>) {
-        event?.preventDefault();
-        const receiptId = Number(returnReceiptId);
-        if (!Number.isInteger(receiptId) || receiptId <= 0) {
-          setNotice({ type: 'error', text: 'Enter a valid receipt number.' });
-          return;
-        }
-        setReturnLoading(true);
-        setReturnSale(null);
-        try {
-          const response = await api.get<{ data: ReturnableSale }>(`/returns/receipts/${receiptId}`);
-          setReturnSale(response.data.data);
-          setReturnQuantities({});
-          setReturnReason('');
-        } catch (error) {
-          const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
-          setNotice({ type: 'error', text: message ?? 'Could not find that receipt.' });
-        } finally {
-          setReturnLoading(false);
-        }
-      }
+    event?.preventDefault();
+    const receiptId = Number(returnReceiptId);
+    if (!Number.isInteger(receiptId) || receiptId <= 0) {
+      setNotice({ type: 'error', text: 'Enter a valid receipt number.' });
+      return;
+    }
+    setReturnLoading(true);
+    setReturnSale(null);
+    try {
+      const response = await api.get<{ data: ReturnableSale }>(`/returns/receipts/${receiptId}`);
+      setReturnSale(response.data.data);
+      setReturnQuantities({});
+      setReturnReason('');
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not find that receipt.' });
+    } finally {
+      setReturnLoading(false);
+    }
+  }
 
   async function submitReturn() {
-        if (!returnSale) return;
-        const items = returnSale.items
-          .map(item => ({ sale_item_id: item.sale_item_id, quantity: Number(returnQuantities[item.sale_item_id] || 0) }))
-          .filter(item => Number.isFinite(item.quantity) && item.quantity > 0);
-        if (!items.length) {
-          setNotice({ type: 'error', text: 'Enter a return quantity greater than 0 for at least one item.' });
-          return;
-        }
-        if (!returnReason.trim()) {
-          setNotice({ type: 'error', text: 'Enter a refund reason before recording the return.' });
-          return;
-        }
-        setReturnSubmitting(true);
-        try {
-          const saleForBill = returnSale;
-          const response = await api.post<{ data: ReturnResult }>('/returns', {
-            sale_id: returnSale.sale_id,
-            items,
-            reason: returnReason.trim(),
-          });
-          setNotice({ type: 'success', text: `Return recorded. Refund: ${money(Number(response.data.data.refund_amount))}` });
-          printReturnBill(response.data.data, saleForBill);
-          await searchReturnReceipt();
-        } catch (error) {
-          const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
-          const validationError = responseData?.errors?.[0];
-          setNotice({ type: 'error', text: validationError ? `${validationError.field}: ${validationError.message}` : responseData?.message ?? 'Could not record return.' });
-        } finally {
-          setReturnSubmitting(false);
-        }
-      }
+    if (!returnSale) return;
+    const items = returnSale.items
+      .map(item => ({ sale_item_id: item.sale_item_id, quantity: Number(returnQuantities[item.sale_item_id] || 0) }))
+      .filter(item => Number.isFinite(item.quantity) && item.quantity > 0);
+    if (!items.length) {
+      setNotice({ type: 'error', text: 'Enter a return quantity greater than 0 for at least one item.' });
+      return;
+    }
+    if (!returnReason.trim()) {
+      setNotice({ type: 'error', text: 'Enter a refund reason before recording the return.' });
+      return;
+    }
+    setReturnSubmitting(true);
+    try {
+      const saleForBill = returnSale;
+      const response = await api.post<{ data: ReturnResult }>('/returns', {
+        sale_id: returnSale.sale_id,
+        items,
+        reason: returnReason.trim(),
+      });
+      setNotice({ type: 'success', text: `Return recorded. Refund: ${money(Number(response.data.data.refund_amount))}` });
+      printReturnBill(response.data.data, saleForBill);
+      await searchReturnReceipt();
+    } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
+      const validationError = responseData?.errors?.[0];
+      setNotice({ type: 'error', text: validationError ? `${validationError.field}: ${validationError.message}` : responseData?.message ?? 'Could not record return.' });
+    } finally {
+      setReturnSubmitting(false);
+    }
+  }
 
   async function refreshDashboard() {
     setDashboardLoading(true);
@@ -950,10 +952,10 @@ function App() {
               <div className="dashboard-card"><span className="dashboard-card-icon profit"><BarChart3 size={18} /></span><div><span>Today's profit</span><strong>{money(Number(dashboard.summary.total_profit))}</strong></div></div>
               <div className="dashboard-card"><span className="dashboard-card-icon transactions"><Receipt size={18} /></span><div><span>Transactions</span><strong>{dashboard.summary.transaction_count}</strong></div></div>
             </div><div className="dashboard-grid">
-              <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Payment totals</h2><p>Collected today by payment method</p></div><button className="icon-button" onClick={() => void refreshDashboard()} aria-label="Refresh dashboard"><RefreshCw size={16} /></button></div><div className="payment-total-list"><div><Banknote size={18} /><span>Cash</span><strong>{money(Number(dashboard.payments.cash))}</strong></div><div><CreditCard size={18} /><span>Card</span><strong>{money(Number(dashboard.payments.card))}</strong></div><div><WalletCards size={18} /><span>Bank transfer</span><strong>{money(Number(dashboard.payments.bank_transfer))}</strong></div></div></section>
-              <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Low-stock products</h2><p>Items at or below reorder level</p></div><TrendingDown size={18} className="dashboard-warning" /></div>{!dashboard.low_stock.length ? <div className="dashboard-list-empty">All products are sufficiently stocked.</div> : <div className="dashboard-list">{dashboard.low_stock.map(item => <div key={item.product_id}><div><strong>{item.name}</strong><span>{item.barcode}</span></div><b className="dashboard-stock-warning">{item.quantity} / {item.reorder_level}</b></div>)}</div>}</section>
-              <section className="panel dashboard-panel dashboard-best-selling"><div className="panel-heading"><div><h2>Best-selling products</h2><p>Top products sold today</p></div><TrendingUp size={18} className="dashboard-success" /></div>{!dashboard.best_selling.length ? <div className="dashboard-list-empty">No sales recorded today.</div> : <div className="dashboard-list">{dashboard.best_selling.map((item, index) => <div key={item.product_id}><div><strong><span className="rank">{index + 1}</span>{item.name}</strong><span>{money(Number(item.sales_amount))} in sales</span></div><b>{item.quantity_sold} sold</b></div>)}</div>}</section>
-            </div></>}
+                <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Payment totals</h2><p>Collected today by payment method</p></div><button className="icon-button" onClick={() => void refreshDashboard()} aria-label="Refresh dashboard"><RefreshCw size={16} /></button></div><div className="payment-total-list"><div><Banknote size={18} /><span>Cash</span><strong>{money(Number(dashboard.payments.cash))}</strong></div><div><CreditCard size={18} /><span>Card</span><strong>{money(Number(dashboard.payments.card))}</strong></div><div><WalletCards size={18} /><span>Bank transfer</span><strong>{money(Number(dashboard.payments.bank_transfer))}</strong></div></div></section>
+                <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Low-stock products</h2><p>Items at or below reorder level</p></div><TrendingDown size={18} className="dashboard-warning" /></div>{!dashboard.low_stock.length ? <div className="dashboard-list-empty">All products are sufficiently stocked.</div> : <div className="dashboard-list">{dashboard.low_stock.map(item => <div key={item.product_id}><div><strong>{item.name}</strong><span>{item.barcode}</span></div><b className="dashboard-stock-warning">{item.quantity} / {item.reorder_level}</b></div>)}</div>}</section>
+                <section className="panel dashboard-panel dashboard-best-selling"><div className="panel-heading"><div><h2>Best-selling products</h2><p>Top products sold today</p></div><TrendingUp size={18} className="dashboard-success" /></div>{!dashboard.best_selling.length ? <div className="dashboard-list-empty">No sales recorded today.</div> : <div className="dashboard-list">{dashboard.best_selling.map((item, index) => <div key={item.product_id}><div><strong><span className="rank">{index + 1}</span>{item.name}</strong><span>{money(Number(item.sales_amount))} in sales</span></div><b>{item.quantity_sold} sold</b></div>)}</div>}</section>
+              </div></>}
           </section> : view === 'reports' ? <section className="reports-content">
             <div className="report-toolbar panel">
               <label>From<input type="date" value={reportFrom} max={reportTo} onChange={event => setReportFrom(event.target.value)} /></label>
