@@ -94,8 +94,15 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
       [importedBy ?? null, fileName ?? null, rows.length],
     );
     const imported = [];
+    const priceChanges = [];
+    const deactivatedProducts = [];
 
     for (const row of rows) {
+      const previousProduct = await client.query(
+        `SELECT product_id, cost_price, selling_price, active
+         FROM products WHERE barcode = $1 FOR UPDATE`,
+        [row.barcode],
+      );
       const category = await client.query(
         `INSERT INTO categories (name) VALUES ($1)
          ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
@@ -126,10 +133,29 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
         [product.rows[0].product_id, row.initial_quantity, row.reorder_level],
       );
       imported.push(product.rows[0]);
+
+      if (previousProduct.rowCount) {
+        const previous = previousProduct.rows[0];
+        if (Number(previous.cost_price) !== row.cost_price
+          || Number(previous.selling_price) !== row.selling_price) {
+          priceChanges.push({
+            product_id: Number(previous.product_id),
+            name: row.name,
+            previous_cost_price: Number(previous.cost_price),
+            new_cost_price: row.cost_price,
+            previous_selling_price: Number(previous.selling_price),
+            new_selling_price: row.selling_price,
+          });
+        }
+      }
+
+      if (previousProduct.rowCount && previousProduct.rows[0].active && !row.active) {
+        deactivatedProducts.push({ product_id: Number(previousProduct.rows[0].product_id), name: row.name });
+      }
     }
 
     await client.query('COMMIT');
-    return { batchId: batch.rows[0].import_batch_id, products: imported };
+    return { batchId: batch.rows[0].import_batch_id, products: imported, priceChanges, deactivatedProducts };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -154,6 +180,12 @@ export async function updateProduct(
   data: ProductInput
 ) {
   const query = `
+    WITH previous AS (
+      SELECT cost_price, selling_price, active
+      FROM products
+      WHERE product_id = $7
+      FOR UPDATE
+    )
     UPDATE products
     SET
       name = $1,
@@ -163,7 +195,10 @@ export async function updateProduct(
       selling_price = $5,
       active = $6
     WHERE product_id = $7
-    RETURNING *;
+    RETURNING *,
+      (SELECT cost_price FROM previous) AS previous_cost_price,
+      (SELECT selling_price FROM previous) AS previous_selling_price,
+      (SELECT active FROM previous) AS previous_active;
   `;
 
   const values = [

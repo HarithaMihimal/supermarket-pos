@@ -55,8 +55,28 @@ export async function updateProduct(
     const id = productIdSchema.parse(req.params.id);
     const data = productSchema.parse(req.body);
 
-    const product = await productService.updateProduct(id, data);
+    const updatedProduct = await productService.updateProduct(id, data);
+    const { previous_cost_price, previous_selling_price, previous_active, ...product } = updatedProduct;
     await writeAudit(req, 'product.updated', 'product', id, { name: product.name });
+    if (previous_active && !product.active) {
+      await writeAudit(req, 'product.removed', 'product', id, {
+        name: product.name,
+        soft_deleted: true,
+        active: false,
+        source: 'product_update',
+      });
+    }
+    if (Number(previous_cost_price) !== Number(product.cost_price)
+      || Number(previous_selling_price) !== Number(product.selling_price)) {
+      await writeAudit(req, 'product.price_changed', 'product', id, {
+        name: product.name,
+        previous_cost_price: Number(previous_cost_price),
+        new_cost_price: Number(product.cost_price),
+        previous_selling_price: Number(previous_selling_price),
+        new_selling_price: Number(product.selling_price),
+        source: 'product_update',
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -72,7 +92,11 @@ export async function removeProduct(req: Request, res: Response, next: NextFunct
   try {
     const id = productIdSchema.parse(req.params.id);
     const product = await productService.removeProduct(id);
-    await writeAudit(req, 'product.removed', 'product', id, { name: product.name });
+    await writeAudit(req, 'product.removed', 'product', id, {
+      name: product.name,
+      soft_deleted: true,
+      active: false,
+    });
     res.json({ success: true, message: 'Product removed from the active catalog' });
   } catch (error) {
     next(error);
@@ -128,7 +152,25 @@ export async function importProducts(req: Request, res: Response, next: NextFunc
     });
     if (!rows.length) throw new AppError(400, 'CSV has no product rows');
 
-    const result = await productService.importProducts(rows, req.user?.userId, req.header('x-file-name'));
+    const { priceChanges, deactivatedProducts, ...result } = await productService.importProducts(rows, req.user?.userId, req.header('x-file-name'));
+    for (const change of priceChanges) {
+      await writeAudit(req, 'product.price_changed', 'product', change.product_id, {
+        name: change.name,
+        previous_cost_price: change.previous_cost_price,
+        new_cost_price: change.new_cost_price,
+        previous_selling_price: change.previous_selling_price,
+        new_selling_price: change.new_selling_price,
+        source: 'product_import',
+      });
+    }
+    for (const product of deactivatedProducts) {
+      await writeAudit(req, 'product.removed', 'product', product.product_id, {
+        name: product.name,
+        soft_deleted: true,
+        active: false,
+        source: 'product_import',
+      });
+    }
     await writeAudit(req, 'products.imported', 'product', undefined, { count: result.products.length, batch_id: result.batchId });
     res.status(201).json({ success: true, message: `${result.products.length} products imported successfully`, data: result });
   } catch (error) {

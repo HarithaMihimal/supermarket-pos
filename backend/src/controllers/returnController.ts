@@ -27,6 +27,17 @@ export async function createReturn(req: Request, res: Response, next: NextFuncti
       refund_amount: result.refund_amount,
       refund_method: result.refund_method,
       reason: result.reason,
+      items: result.items.map((item: {
+        sale_item_id: number;
+        product_id: number;
+        quantity: number;
+        refund: number;
+      }) => ({
+        sale_item_id: item.sale_item_id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        refund_amount: item.refund,
+      })),
     });
     res.status(201).json({ success: true, data: result });
   } catch (error) {

@@ -26,8 +26,12 @@ export async function adjustInventory(req: Request, res: Response, next: NextFun
     const data = inventoryAdjustmentSchema.parse(req.body);
     const movement = await inventoryService.adjustInventory(data);
     await writeAudit(req, 'inventory.adjusted', 'product', data.product_id, {
+      branch_id: data.branch_id,
       quantityDelta: data.quantity_delta,
+      quantityBefore: Number(movement.quantity) - Number(movement.quantity_delta),
+      quantityAfter: Number(movement.quantity),
       reason: data.reason,
+      note: data.note ?? null,
     });
 
     res.status(201).json({
