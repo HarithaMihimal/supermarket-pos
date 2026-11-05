@@ -4,6 +4,7 @@ import { loginSchema, signupSchema } from '../src/schemas/authSchema';
 import { saleSchema } from '../src/schemas/saleSchema';
 import { productSchema } from '../src/schemas/productSchema';
 import { inventoryAdjustmentSchema } from '../src/schemas/inventorySchema';
+import { reportQuerySchema } from '../src/schemas/reportSchema';
 
 test('login schema rejects malformed credentials', () => {
   assert.equal(loginSchema.safeParse({ email: 'not-an-email', password: '' }).success, false);
@@ -54,4 +55,24 @@ test('inventory adjustment schema accepts numeric values returned by PostgreSQL'
     assert.equal(result.data.product_id, 1);
     assert.equal(result.data.quantity_delta, 2);
   }
+});
+
+test('report query accepts valid date ranges and grouping', () => {
+  const result = reportQuerySchema.safeParse({
+    from: '2026-10-01',
+    to: '2026-10-31',
+    group_by: 'month',
+  });
+  assert.equal(result.success, true);
+});
+
+test('report query rejects invalid dates and reversed ranges', () => {
+  assert.equal(reportQuerySchema.safeParse({
+    from: '2026-02-30',
+    to: '2026-03-01',
+  }).success, false);
+  assert.equal(reportQuerySchema.safeParse({
+    from: '2026-10-02',
+    to: '2026-10-01',
+  }).success, false);
 });

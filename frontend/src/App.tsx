@@ -6,6 +6,7 @@ import {
   Barcode,
   CheckCircle2,
   CreditCard,
+  FileText,
   LayoutDashboard,
   Minus,
   Package,
@@ -51,6 +52,21 @@ type InventoryItem = {
 };
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
 type User = { userId: number; branchId: number; fullName: string; email: string; role: 'admin' | 'manager' | 'cashier' };
+type ManagementReports = {
+  from: string;
+  to: string;
+  group_by: 'day' | 'month';
+  sales: { period: string; transaction_count: number; gross_sales: string; refunds: string; net_sales: string }[];
+  profit: { period: string; gross_profit_estimate: string }[];
+  cashiers: { user_id: number; cashier: string; transaction_count: number; gross_sales: string; refunds: string; net_sales: string; gross_profit_estimate: string }[];
+  inventory: {
+    items: { product_id: number; name: string; barcode: string; quantity: string; cost_price: string; selling_price: string; cost_value: string; retail_value: string }[];
+    total_cost_value: string;
+    total_retail_value: string;
+  };
+  profit_basis: string;
+  tax_report: { available: boolean; message: string };
+};
 type SaleRecord = {
   sale_id: number;
   total_amount: string;
@@ -87,7 +103,7 @@ type ReturnResult = {
   created_at: string;
   items: { sale_item_id: number; quantity: number; refund: number }[];
 };
-type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns' | 'purchases';
+type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns' | 'purchases' | 'reports';
 type Supplier = { supplier_id: number; name: string; contact_name: string | null; email: string | null; phone: string | null };
 type PurchaseOrder = {
   purchase_order_id: number; supplier_name: string; status: string; order_date: string;
@@ -151,6 +167,10 @@ const parseAmount = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const dateInputValue = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  .toISOString()
+  .slice(0, 10);
+
 const money = (value: number) => `LKR ${value.toLocaleString('en-LK', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -180,6 +200,14 @@ function App() {
   const [view, setView] = useState<View>('checkout');
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [reportFrom, setReportFrom] = useState(() => {
+    const now = new Date();
+    return dateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [reportTo, setReportTo] = useState(() => dateInputValue(new Date()));
+  const [reportGroup, setReportGroup] = useState<'day' | 'month'>('day');
+  const [managementReports, setManagementReports] = useState<ManagementReports | null>(null);
+  const [reportsLoading, setReportsLoading] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -630,6 +658,24 @@ function App() {
     }
   }
 
+  async function refreshManagementReports() {
+    if (reportFrom > reportTo) {
+      setNotice({ type: 'error', text: 'The report start date must be on or before the end date.' });
+      return;
+    }
+    setReportsLoading(true);
+    try {
+      const response = await api.get<{ data: ManagementReports }>('/reports', {
+        params: { from: reportFrom, to: reportTo, group_by: reportGroup },
+      });
+      setManagementReports(response.data.data);
+    } catch {
+      setNotice({ type: 'error', text: 'Could not load management reports.' });
+    } finally {
+      setReportsLoading(false);
+    }
+  }
+
   useEffect(() => {
     // Dashboard data is refreshed whenever its view becomes active.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -667,6 +713,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
+  useEffect(() => {
+    // Report filters are synchronized with the management report query.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (view === 'reports' && canManageProducts()) void refreshManagementReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, reportFrom, reportTo, reportGroup]);
+
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase().trim();
     return products.filter(product => {
@@ -685,6 +738,11 @@ function App() {
     (sum, item) => sum + Math.min(Number(returnQuantities[item.sale_item_id] || 0), item.returnable_quantity) * Number(item.unit_price),
     0,
   ) ?? 0;
+  const reportTotals = managementReports ? {
+    netSales: managementReports.sales.reduce((sum, item) => sum + Number(item.net_sales), 0),
+    estimatedProfit: managementReports.profit.reduce((sum, item) => sum + Number(item.gross_profit_estimate), 0),
+    transactions: managementReports.sales.reduce((sum, item) => sum + item.transaction_count, 0),
+  } : null;
 
   async function toggleSaleDetails(saleId: number) {
     if (expandedSaleId === saleId) {
@@ -860,10 +918,11 @@ function App() {
         <div className="user-menu"><button className="settings-trigger" onClick={() => void openSettings()} aria-label="Open shop settings"><Settings size={17} /></button><div className="avatar">{user.fullName.slice(0, 2).toUpperCase()}</div><span>{user.fullName}</span><button className="text-button" onClick={() => { localStorage.clear(); setUser(null); }}>Sign out</button></div>
       </header>
 
-      <div className="layout">
+      <div className={`layout ${view === 'checkout' ? 'checkout-layout' : 'workspace-layout'}`}>
         <aside className="sidebar">
           <nav>
             <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><BarChart3 size={18} /> Dashboard</button>
+            {canManageProducts() && <button className={`nav-item ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}><FileText size={18} /> Reports</button>}
             <button className={`nav-item ${view === 'checkout' ? 'active' : ''}`} onClick={() => setView('checkout')}><LayoutDashboard size={18} /> Checkout</button>
             <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
@@ -874,7 +933,7 @@ function App() {
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : view === 'purchases' ? 'SUPPLY CHAIN' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : view === 'purchases' ? 'Supplier & purchasing' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : view === 'purchases' ? 'SUPPLY CHAIN' : view === 'reports' ? 'MANAGEMENT' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : view === 'purchases' ? 'Supplier & purchasing' : view === 'reports' ? 'Reports' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
           {view === 'purchases' ? <section className="catalog-panel panel">
@@ -895,6 +954,45 @@ function App() {
               <section className="panel dashboard-panel"><div className="panel-heading"><div><h2>Low-stock products</h2><p>Items at or below reorder level</p></div><TrendingDown size={18} className="dashboard-warning" /></div>{!dashboard.low_stock.length ? <div className="dashboard-list-empty">All products are sufficiently stocked.</div> : <div className="dashboard-list">{dashboard.low_stock.map(item => <div key={item.product_id}><div><strong>{item.name}</strong><span>{item.barcode}</span></div><b className="dashboard-stock-warning">{item.quantity} / {item.reorder_level}</b></div>)}</div>}</section>
               <section className="panel dashboard-panel dashboard-best-selling"><div className="panel-heading"><div><h2>Best-selling products</h2><p>Top products sold today</p></div><TrendingUp size={18} className="dashboard-success" /></div>{!dashboard.best_selling.length ? <div className="dashboard-list-empty">No sales recorded today.</div> : <div className="dashboard-list">{dashboard.best_selling.map((item, index) => <div key={item.product_id}><div><strong><span className="rank">{index + 1}</span>{item.name}</strong><span>{money(Number(item.sales_amount))} in sales</span></div><b>{item.quantity_sold} sold</b></div>)}</div>}</section>
             </div></>}
+          </section> : view === 'reports' ? <section className="reports-content">
+            <div className="report-toolbar panel">
+              <label>From<input type="date" value={reportFrom} max={reportTo} onChange={event => setReportFrom(event.target.value)} /></label>
+              <label>To<input type="date" value={reportTo} min={reportFrom} onChange={event => setReportTo(event.target.value)} /></label>
+              <label>Group by<select value={reportGroup} onChange={event => setReportGroup(event.target.value as typeof reportGroup)}><option value="day">Day</option><option value="month">Month</option></select></label>
+              <button className="icon-button" onClick={() => void refreshManagementReports()} aria-label="Refresh reports" disabled={reportsLoading}><RefreshCw size={16} /></button>
+            </div>
+            {reportsLoading && <div className="panel report-empty">Loading reports...</div>}
+            {!reportsLoading && !managementReports && <div className="panel report-empty">No report data loaded for this period.</div>}
+            {!reportsLoading && managementReports && reportTotals && <>
+              <div className="dashboard-cards report-summary">
+                <div className="dashboard-card"><span className="dashboard-card-icon sales"><TrendingUp size={18} /></span><div><span>Net sales</span><strong>{money(reportTotals.netSales)}</strong></div></div>
+                <div className="dashboard-card"><span className="dashboard-card-icon profit"><BarChart3 size={18} /></span><div><span>Estimated profit</span><strong>{money(reportTotals.estimatedProfit)}</strong></div></div>
+                <div className="dashboard-card"><span className="dashboard-card-icon transactions"><Receipt size={18} /></span><div><span>Transactions</span><strong>{reportTotals.transactions}</strong></div></div>
+              </div>
+              <section className="panel report-section">
+                <div className="panel-heading"><div><h2>Sales & profit</h2><p>{managementReports.from} to {managementReports.to} · profit uses current product costs</p></div></div>
+                <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Period</th><th>Transactions</th><th>Gross sales</th><th>Refunds</th><th>Net sales</th><th>Est. profit</th></tr></thead><tbody>
+                  {managementReports.sales.map((row, index) => <tr key={row.period}><td>{row.period}</td><td>{row.transaction_count}</td><td>{money(Number(row.gross_sales))}</td><td>{money(Number(row.refunds))}</td><td>{money(Number(row.net_sales))}</td><td>{money(Number(managementReports.profit[index]?.gross_profit_estimate ?? 0))}</td></tr>)}
+                </tbody></table></div>
+                <p className="report-note">{managementReports.profit_basis}</p>
+              </section>
+              <div className="report-grid">
+                <section className="panel report-section"><div className="panel-heading"><div><h2>Cashier performance</h2><p>Sales and estimated gross profit by cashier</p></div></div>
+                  <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Cashier</th><th>Transactions</th><th>Net sales</th><th>Est. profit</th></tr></thead><tbody>
+                    {managementReports.cashiers.map(cashier => <tr key={cashier.user_id}><td>{cashier.cashier}</td><td>{cashier.transaction_count}</td><td>{money(Number(cashier.net_sales))}</td><td>{money(Number(cashier.gross_profit_estimate))}</td></tr>)}
+                    {!managementReports.cashiers.length && <tr><td colSpan={4}>No cashier sales in this period.</td></tr>}
+                  </tbody></table></div>
+                </section>
+                <section className="panel report-section"><div className="panel-heading"><div><h2>Inventory valuation</h2><p>Current stock valued at current product prices</p></div></div>
+                  <div className="valuation-totals"><div><span>Cost value</span><strong>{money(Number(managementReports.inventory.total_cost_value))}</strong></div><div><span>Retail value</span><strong>{money(Number(managementReports.inventory.total_retail_value))}</strong></div></div>
+                  <div className="report-table-wrap report-inventory-table"><table className="report-table"><thead><tr><th>Product</th><th>Qty</th><th>Cost value</th></tr></thead><tbody>
+                    {managementReports.inventory.items.map(item => <tr key={item.product_id}><td>{item.name}</td><td>{item.quantity}</td><td>{money(Number(item.cost_value))}</td></tr>)}
+                    {!managementReports.inventory.items.length && <tr><td colSpan={3}>No inventory recorded.</td></tr>}
+                  </tbody></table></div>
+                </section>
+              </div>
+              <section className="panel report-tax"><div><p className="eyebrow">TAX REPORT</p><h2>Tax calculation is not configured</h2><p>{managementReports.tax_report.message}</p></div><span className="tax-status">Setup required</span></section>
+            </>}
           </section> : view === 'checkout' ? <section className="catalog-panel panel">
             <div className="panel-heading"><div><h2>Product catalog</h2><p>Select an item to add it to the current sale</p></div><div className="catalog-actions"><span className="product-count">{filteredProducts.length} products</span>{canManageProducts() && <><button className="small-button" onClick={() => setProductFormOpen(true)}>Manual add</button><button className="small-button secondary-button" onClick={() => setCsvPortalOpen(true)}>Upload CSV</button></>}</div></div>
             <div className="catalog-controls">
@@ -990,7 +1088,7 @@ function App() {
           </section>}
         </main>
 
-        <aside className="checkout-panel">
+        {view === 'checkout' && <aside className="checkout-panel">
           <div className="checkout-heading"><div><p className="eyebrow">CURRENT SALE</p><h2>Order summary</h2></div><span className="item-pill">{itemCount} items</span></div>
           <div className="cart-list">
             {!cart.length && <div className="cart-empty"><ShoppingCart size={30} /><p>Your cart is empty</p><span>Add products from the catalog to begin.</span></div>}
@@ -1002,7 +1100,7 @@ function App() {
             <button className="complete-button" onClick={completeSale} disabled={checkingOut || !cart.length || (parseAmount(amountPaid) ?? 0) < total}>{checkingOut ? 'Processing...' : `Complete sale · ${money(total)}`}</button>
             <div className="cashier-note"><UserRound size={14} /> Sale will be recorded under {user.fullName}</div>
           </div>
-        </aside>
+        </aside>}
       </div>
       {productFormOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setProductFormOpen(false); }}>
         <section className="settings-dialog product-dialog" role="dialog" aria-modal="true" aria-labelledby="product-dialog-title">
