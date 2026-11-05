@@ -717,9 +717,7 @@ function App() {
 
   useEffect(() => {
     // Report filters are synchronized with the management report query.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (view === 'reports' && canManageProducts()) void refreshManagementReports();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, reportFrom, reportTo, reportGroup]);
 
   const filteredProducts = useMemo(() => {
