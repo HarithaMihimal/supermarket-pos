@@ -23,10 +23,20 @@ dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
+const configuredFrontendOrigins = process.env.FRONTEND_URL
+  ?.split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+const frontendOrigins = configuredFrontendOrigins?.flatMap(origin => {
+  const localOrigin = origin.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?$/);
+  if (!localOrigin) return [origin];
+  const alternateHost = localOrigin[2] === 'localhost' ? '127.0.0.1' : 'localhost';
+  return [origin, `${localOrigin[1]}${alternateHost}${localOrigin[3] ?? ''}`];
+});
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: frontendOrigins ?? process.env.FRONTEND_URL,
 }));
 app.use(express.json());
 app.use(requestLogger);

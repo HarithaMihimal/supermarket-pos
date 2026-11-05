@@ -1529,6 +1529,19 @@ button {
   font-size: 12px;
 }
 
+.report-run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+}
+
+.report-run:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
 .report-toolbar .icon-button {
   min-height: 36px;
   min-width: 36px;

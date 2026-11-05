@@ -715,11 +715,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
-  useEffect(() => {
-    // Report filters are synchronized with the management report query.
-    if (view === 'reports' && canManageProducts()) void refreshManagementReports();
-  }, [view, reportFrom, reportTo, reportGroup]);
-
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase().trim();
     return products.filter(product => {
@@ -922,7 +917,7 @@ function App() {
         <aside className="sidebar">
           <nav>
             <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><BarChart3 size={18} /> Dashboard</button>
-            {canManageProducts() && <button className={`nav-item ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}><FileText size={18} /> Reports</button>}
+            {canManageProducts() && <button className={`nav-item ${view === 'reports' ? 'active' : ''}`} onClick={() => { setView('reports'); void refreshManagementReports(); }}><FileText size={18} /> Reports</button>}
             <button className={`nav-item ${view === 'checkout' ? 'active' : ''}`} onClick={() => setView('checkout')}><LayoutDashboard size={18} /> Checkout</button>
             <button className={`nav-item ${view === 'inventory' ? 'active' : ''}`} onClick={() => setView('inventory')}><Package size={18} /> Inventory</button>
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
@@ -959,7 +954,7 @@ function App() {
               <label>From<input type="date" value={reportFrom} max={reportTo} onChange={event => setReportFrom(event.target.value)} /></label>
               <label>To<input type="date" value={reportTo} min={reportFrom} onChange={event => setReportTo(event.target.value)} /></label>
               <label>Group by<select value={reportGroup} onChange={event => setReportGroup(event.target.value as typeof reportGroup)}><option value="day">Day</option><option value="month">Month</option></select></label>
-              <button className="icon-button" onClick={() => void refreshManagementReports()} aria-label="Refresh reports" disabled={reportsLoading}><RefreshCw size={16} /></button>
+              <button className="small-button report-run" onClick={() => void refreshManagementReports()} disabled={reportsLoading}><RefreshCw size={14} />{reportsLoading ? 'Loading...' : 'Run report'}</button>
             </div>
             {reportsLoading && <div className="panel report-empty">Loading reports...</div>}
             {!reportsLoading && !managementReports && <div className="panel report-empty">No report data loaded for this period.</div>}
