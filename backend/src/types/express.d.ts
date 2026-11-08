@@ -6,6 +6,7 @@ declare global {
       user?: {
         userId: number;
         branchId: number;
+        branchName: string;
         fullName: string;
         email: string;
         role: UserRole;

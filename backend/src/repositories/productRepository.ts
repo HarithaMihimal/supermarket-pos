@@ -2,8 +2,8 @@ import { pool } from '../config/database';
 import { CategoryInput, ProductInput } from '../schemas/productSchema';
 import { ProductImportRow } from '../schemas/productImportSchema';
 
-export async function listProducts(search?: string, categoryId?: number) {
-  const values: (string | number)[] = [];
+export async function listProducts(branchId: number, search?: string, categoryId?: number) {
+  const values: (string | number)[] = [branchId];
   const filters = ['p.active = TRUE'];
 
   if (search) {
@@ -21,7 +21,7 @@ export async function listProducts(search?: string, categoryId?: number) {
            c.category_id, c.name AS category, COALESCE(i.quantity, 0) AS quantity
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.category_id
-    LEFT JOIN inventory i ON p.product_id = i.product_id AND i.branch_id = 1
+    LEFT JOIN inventory i ON p.product_id = i.product_id AND i.branch_id = $1
     WHERE ${filters.join(' AND ')}
     ORDER BY p.name
   `, values);
@@ -52,7 +52,7 @@ export async function updateCategory(id: number, data: CategoryInput) {
   return result.rows[0] ?? null;
 }
 
-export async function createProduct(data: ProductInput) {
+export async function createProduct(data: ProductInput, branchId: number) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -66,11 +66,11 @@ export async function createProduct(data: ProductInput) {
       data.selling_price, data.active,
     ]);
     await client.query(
-      `INSERT INTO inventory (branch_id, product_id, quantity)
-       VALUES (1, $1, $2)
-       ON CONFLICT (branch_id, product_id)
-       DO UPDATE SET quantity = EXCLUDED.quantity, reorder_level = $3`,
-      [result.rows[0].product_id, data.initial_quantity, data.reorder_level],
+      `INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
+       SELECT branch_id, $1, CASE WHEN branch_id = $2 THEN $3 ELSE 0 END, $4
+       FROM branches
+       ON CONFLICT (branch_id, product_id) DO NOTHING`,
+      [result.rows[0].product_id, branchId, data.initial_quantity, data.reorder_level],
     );
     await client.query('COMMIT');
     return result.rows[0];
@@ -83,15 +83,15 @@ export async function createProduct(data: ProductInput) {
 
 }
 
-export async function importProducts(rows: ProductImportRow[], importedBy?: number, fileName?: string) {
+export async function importProducts(rows: ProductImportRow[], branchId: number, importedBy?: number, fileName?: string) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const batch = await client.query(
       `INSERT INTO product_import_batches (branch_id, imported_by, file_name, row_count)
-       VALUES (1, $1, $2, $3)
+       VALUES ($1, $2, $3, $4)
        RETURNING import_batch_id`,
-      [importedBy ?? null, fileName ?? null, rows.length],
+      [branchId, importedBy ?? null, fileName ?? null, rows.length],
     );
     const imported = [];
     const priceChanges = [];
@@ -126,11 +126,12 @@ export async function importProducts(rows: ProductImportRow[], importedBy?: numb
       ]);
       await client.query(
         `INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
-         VALUES (1, $1, $2, $3)
+         SELECT branch_id, $1, CASE WHEN branch_id = $2 THEN $3 ELSE 0 END, $4
+         FROM branches
          ON CONFLICT (branch_id, product_id) DO UPDATE SET
-           quantity = EXCLUDED.quantity,
+           quantity = CASE WHEN inventory.branch_id = $2 THEN EXCLUDED.quantity ELSE inventory.quantity END,
            reorder_level = EXCLUDED.reorder_level`,
-        [product.rows[0].product_id, row.initial_quantity, row.reorder_level],
+        [product.rows[0].product_id, branchId, row.initial_quantity, row.reorder_level],
       );
       imported.push(product.rows[0]);
 

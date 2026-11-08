@@ -5,6 +5,6 @@ export function listInventory(search?: string, lowStockOnly = false, branchId = 
   return inventoryRepository.listInventory(search, lowStockOnly, branchId);
 }
 
-export function adjustInventory(data: InventoryAdjustmentInput) {
-  return inventoryRepository.adjustInventory(data);
+export function adjustInventory(data: InventoryAdjustmentInput, branchId: number) {
+  return inventoryRepository.adjustInventory(data, branchId);
 }

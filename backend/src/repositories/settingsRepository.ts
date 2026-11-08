@@ -6,16 +6,16 @@ const settingsFields = `
   receipt_footer, default_reorder_level
 `;
 
-export async function getSettings() {
+export async function getSettings(branchId: number) {
   const result = await pool.query(`
     SELECT ${settingsFields}
     FROM branches
-    WHERE branch_id = 1
-  `);
+    WHERE branch_id = $1
+  `, [branchId]);
   return result.rows[0] ?? null;
 }
 
-export async function updateSettings(data: SettingsInput) {
+export async function updateSettings(data: SettingsInput, branchId: number) {
   const result = await pool.query(`
     UPDATE branches
     SET name = $1,
@@ -26,7 +26,7 @@ export async function updateSettings(data: SettingsInput) {
         currency = $6,
         receipt_footer = $7,
         default_reorder_level = $8
-    WHERE branch_id = 1
+    WHERE branch_id = $9
     RETURNING ${settingsFields}
   `, [
     data.name,
@@ -37,6 +37,7 @@ export async function updateSettings(data: SettingsInput) {
     data.currency,
     data.receipt_footer,
     data.default_reorder_level,
+    branchId,
   ]);
   return result.rows[0] ?? null;
 }

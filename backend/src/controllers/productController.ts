@@ -11,7 +11,8 @@ export async function listProducts(req: Request, res: Response, next: NextFuncti
     const categoryId = req.query.category_id
       ? productIdSchema.parse(req.query.category_id)
       : undefined;
-    res.json({ success: true, data: await productService.listProducts(search, categoryId) });
+    if (!req.user) throw new Error('Authenticated user context is missing');
+    res.json({ success: true, data: await productService.listProducts(req.user.branchId, search, categoryId) });
   } catch (error) {
     next(error);
   }
@@ -33,7 +34,8 @@ export async function createProduct(
   try {
     const data = productSchema.parse(req.body);
 
-    const product = await productService.createProduct(data);
+    if (!req.user) throw new Error('Authenticated user context is missing');
+    const product = await productService.createProduct(data, req.user.branchId);
     await writeAudit(req, 'product.created', 'product', product.product_id, { name: product.name });
 
     res.status(201).json({
@@ -152,7 +154,8 @@ export async function importProducts(req: Request, res: Response, next: NextFunc
     });
     if (!rows.length) throw new AppError(400, 'CSV has no product rows');
 
-    const { priceChanges, deactivatedProducts, ...result } = await productService.importProducts(rows, req.user?.userId, req.header('x-file-name'));
+    if (!req.user) throw new Error('Authenticated user context is missing');
+    const { priceChanges, deactivatedProducts, ...result } = await productService.importProducts(rows, req.user.branchId, req.user.userId, req.header('x-file-name'));
     for (const change of priceChanges) {
       await writeAudit(req, 'product.price_changed', 'product', change.product_id, {
         name: change.name,

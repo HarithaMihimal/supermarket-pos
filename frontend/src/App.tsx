@@ -4,8 +4,10 @@ import {
   Banknote,
   BarChart3,
   Barcode,
+  Building2,
   CheckCircle2,
   CreditCard,
+  ArrowLeftRight,
   FileText,
   LayoutDashboard,
   Minus,
@@ -51,7 +53,7 @@ type InventoryItem = {
   low_stock: boolean;
 };
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
-type User = { userId: number; branchId: number; fullName: string; email: string; role: 'admin' | 'manager' | 'cashier' };
+type User = { userId: number; branchId: number; branchName: string; fullName: string; email: string; role: 'admin' | 'manager' | 'cashier' };
 type ManagementReports = {
   from: string;
   to: string;
@@ -103,7 +105,18 @@ type ReturnResult = {
   created_at: string;
   items: { sale_item_id: number; quantity: number; refund: number }[];
 };
-type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns' | 'purchases' | 'reports';
+type View = 'dashboard' | 'checkout' | 'inventory' | 'sales' | 'returns' | 'purchases' | 'reports' | 'branches' | 'transfers';
+type Branch = { branch_id: number; name: string; address: string | null };
+type BranchUser = { user_id: number; full_name: string; email: string; role: 'manager' | 'cashier'; created_at: string };
+type StockTransfer = {
+  transfer_id: number;
+  source_branch: string;
+  destination_branch: string;
+  note: string | null;
+  created_at: string;
+  transferred_by: string;
+  items: { product_id: number; product_name: string; quantity: string }[];
+};
 type Supplier = { supplier_id: number; name: string; contact_name: string | null; email: string | null; phone: string | null };
 type PurchaseOrder = {
   purchase_order_id: number; supplier_name: string; status: string; order_date: string;
@@ -257,6 +270,21 @@ function App() {
   const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', email: '', phone: '' });
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [receiving, setReceiving] = useState<Record<number, string>>({});
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchUsers, setBranchUsers] = useState<BranchUser[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [branchForm, setBranchForm] = useState({ name: '', address: '' });
+  const [branchUserForm, setBranchUserForm] = useState({
+    full_name: '', email: '', password: '', role: 'cashier' as 'manager' | 'cashier',
+  });
+  const [transferDestinationId, setTransferDestinationId] = useState('');
+  const [transferProductId, setTransferProductId] = useState('');
+  const [transferQuantity, setTransferQuantity] = useState('1');
+  const [transferNote, setTransferNote] = useState('');
+  const [stockTransfers, setStockTransfers] = useState<StockTransfer[]>([]);
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [transferSaving, setTransferSaving] = useState(false);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -576,6 +604,104 @@ function App() {
     }
   }
 
+  async function refreshBranches() {
+    setBranchLoading(true);
+    try {
+      const response = await api.get<{ data: Branch[] }>('/branches');
+      const result = response.data.data.map(branch => ({ ...branch, branch_id: Number(branch.branch_id) }));
+      setBranches(result);
+      setSelectedBranchId(current => current || String(result[0]?.branch_id ?? ''));
+      setTransferDestinationId(current => current || String(result.find(branch => branch.branch_id !== user?.branchId)?.branch_id ?? ''));
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not load branches.' });
+    } finally {
+      setBranchLoading(false);
+    }
+  }
+
+  async function refreshBranchUsers(branchId: string) {
+    if (!branchId) {
+      setBranchUsers([]);
+      return;
+    }
+    try {
+      const response = await api.get<{ data: BranchUser[] }>(`/branches/${branchId}/users`);
+      setBranchUsers(response.data.data);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not load branch users.' });
+    }
+  }
+
+  async function saveBranch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const response = await api.post<{ data: Branch }>('/branches', branchForm);
+      const branch = { ...response.data.data, branch_id: Number(response.data.data.branch_id) };
+      setBranches(current => [...current, branch].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedBranchId(String(branch.branch_id));
+      setBranchForm({ name: '', address: '' });
+      setNotice({ type: 'success', text: `${branch.name} created.` });
+    } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
+      setNotice({ type: 'error', text: responseData?.errors?.[0]?.message ?? responseData?.message ?? 'Could not create branch.' });
+    }
+  }
+
+  async function saveBranchUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedBranchId) return;
+    try {
+      await api.post(`/branches/${selectedBranchId}/users`, branchUserForm);
+      setNotice({ type: 'success', text: 'Branch user created.' });
+      setBranchUserForm({ full_name: '', email: '', password: '', role: 'cashier' });
+      await refreshBranchUsers(selectedBranchId);
+    } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
+      setNotice({ type: 'error', text: responseData?.errors?.[0]?.message ?? responseData?.message ?? 'Could not create branch user.' });
+    }
+  }
+
+  async function refreshStockTransfers() {
+    setTransferLoading(true);
+    try {
+      const response = await api.get<{ data: StockTransfer[] }>('/inventory/transfers');
+      setStockTransfers(response.data.data.map(item => ({ ...item, transfer_id: Number(item.transfer_id) })));
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+      setNotice({ type: 'error', text: message ?? 'Could not load stock transfers.' });
+    } finally {
+      setTransferLoading(false);
+    }
+  }
+
+  async function submitStockTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!transferDestinationId || !transferProductId) {
+      setNotice({ type: 'error', text: 'Choose a destination branch and product.' });
+      return;
+    }
+    setTransferSaving(true);
+    try {
+      await api.post('/inventory/transfers', {
+        destination_branch_id: Number(transferDestinationId),
+        items: [{ product_id: Number(transferProductId), quantity: Number(transferQuantity) }],
+        note: transferNote.trim() || undefined,
+      });
+      setNotice({ type: 'success', text: 'Stock transfer completed.' });
+      setTransferProductId('');
+      setTransferQuantity('1');
+      setTransferNote('');
+      await Promise.all([refreshStockTransfers(), refreshInventory(), refreshCatalog()]);
+    } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
+      setNotice({ type: 'error', text: responseData?.errors?.[0]?.message ?? responseData?.message ?? 'Could not transfer stock.' });
+    } finally {
+      setTransferSaving(false);
+    }
+  }
+
   async function refreshSales() {
     setSalesLoading(true);
     try {
@@ -684,6 +810,17 @@ function App() {
     if (view === 'dashboard') void refreshDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
+
+  useEffect(() => {
+    if (view === 'branches' || view === 'transfers') void refreshBranches();
+    if (view === 'transfers') void refreshStockTransfers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  useEffect(() => {
+    if (view === 'branches' && selectedBranchId) void refreshBranchUsers(selectedBranchId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, selectedBranchId]);
 
   useEffect(() => {
     if (!user) return;
@@ -909,7 +1046,7 @@ function App() {
     <div className="pos-app">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><ShoppingCart size={20} /></div><span>Market<span className="brand-accent">Flow</span></span></div>
-        <div className="store-status"><span className="status-dot" /> {shopSettings?.name ?? 'Main Branch'} <span className="status-divider" /> Register 01</div>
+        <div className="store-status"><span className="status-dot" /> {shopSettings?.name ?? user.branchName ?? 'Main Branch'} <span className="status-divider" /> Register 01</div>
         <div className="user-menu"><button className="settings-trigger" onClick={() => void openSettings()} aria-label="Open shop settings"><Settings size={17} /></button><div className="avatar">{user.fullName.slice(0, 2).toUpperCase()}</div><span>{user.fullName}</span><button className="text-button" onClick={() => { localStorage.clear(); setUser(null); }}>Sign out</button></div>
       </header>
 
@@ -923,15 +1060,58 @@ function App() {
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
             <button className={`nav-item ${view === 'returns' ? 'active' : ''}`} onClick={() => setView('returns')}><RotateCcw size={18} /> Returns</button>
             {canManageProducts() && <button className={`nav-item ${view === 'purchases' ? 'active' : ''}`} onClick={() => setView('purchases')}><Truck size={18} /> Purchasing</button>}
+            {canManageProducts() && <button className={`nav-item ${view === 'transfers' ? 'active' : ''}`} onClick={() => setView('transfers')}><ArrowLeftRight size={18} /> Stock transfers</button>}
+            {user.role === 'admin' && <button className={`nav-item ${view === 'branches' ? 'active' : ''}`} onClick={() => setView('branches')}><Building2 size={18} /> Branches & users</button>}
           </nav>
           <div className="sidebar-footer">v1.0.0 <span>●</span> System online</div>
         </aside>
 
         <main className="workspace">
-          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : view === 'purchases' ? 'SUPPLY CHAIN' : view === 'reports' ? 'MANAGEMENT' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : view === 'purchases' ? 'Supplier & purchasing' : view === 'reports' ? 'Reports' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
+          <div className="page-heading"><div><p className="eyebrow">{view === 'dashboard' ? 'OVERVIEW' : view === 'checkout' ? 'POINT OF SALE' : view === 'inventory' || view === 'transfers' ? 'STOCK CONTROL' : view === 'returns' ? 'CUSTOMER SERVICE' : view === 'purchases' ? 'SUPPLY CHAIN' : view === 'reports' || view === 'branches' ? 'MANAGEMENT' : 'REPORTING'}</p><h1>{view === 'dashboard' ? 'Dashboard' : view === 'checkout' ? 'New transaction' : view === 'inventory' ? 'Inventory' : view === 'returns' ? 'Returns & refunds' : view === 'purchases' ? 'Supplier & purchasing' : view === 'reports' ? 'Reports' : view === 'branches' ? 'Branches & users' : view === 'transfers' ? 'Stock transfers' : 'Sales history'}</h1></div><div className="date-label">{new Date().toLocaleDateString('en-LK', { weekday: 'long', month: 'short', day: 'numeric' })}</div></div>
           {notice && <div className={`notice ${notice.type}`}><span>{notice.type === 'success' ? <CheckCircle2 size={18} /> : '!'}</span>{notice.text}</div>}
 
-          {view === 'purchases' ? <section className="catalog-panel panel">
+          {view === 'branches' ? <div className="dashboard-content">
+            <section className="panel dashboard-panel">
+              <div className="panel-heading"><div><h2>Branches</h2><p>Create locations to track separate inventory and staff</p></div><button className="icon-button" onClick={() => void refreshBranches()} aria-label="Refresh branches"><RefreshCw size={16} /></button></div>
+              <form className="catalog-controls" onSubmit={event => void saveBranch(event)}>
+                <input value={branchForm.name} onChange={event => setBranchForm({ ...branchForm, name: event.target.value })} placeholder="Branch name" minLength={2} maxLength={100} required />
+                <input value={branchForm.address} onChange={event => setBranchForm({ ...branchForm, address: event.target.value })} placeholder="Address (optional)" />
+                <button className="small-button">Create branch</button>
+              </form>
+              {branchLoading ? <div className="dashboard-empty">Loading branches...</div> : <div className="inventory-list">{branches.map(branch => <div className="inventory-row" key={branch.branch_id}><div><strong>{branch.name}</strong><span>{branch.address || 'No address recorded'}</span></div><strong>{branch.branch_id === user.branchId ? 'Your branch' : ''}</strong></div>)}</div>}
+            </section>
+            <section className="panel dashboard-panel">
+              <div className="panel-heading"><div><h2>Branch users</h2><p>Create manager and cashier accounts assigned to one branch</p></div></div>
+              <div className="catalog-controls">
+                <select value={selectedBranchId} onChange={event => { setSelectedBranchId(event.target.value); void refreshBranchUsers(event.target.value); }} aria-label="Select branch">
+                  <option value="">Select branch</option>{branches.map(branch => <option key={branch.branch_id} value={branch.branch_id}>{branch.name}</option>)}
+                </select>
+              </div>
+              <form className="catalog-controls" onSubmit={event => void saveBranchUser(event)}>
+                <input value={branchUserForm.full_name} onChange={event => setBranchUserForm({ ...branchUserForm, full_name: event.target.value })} placeholder="Full name" minLength={2} required />
+                <input type="email" value={branchUserForm.email} onChange={event => setBranchUserForm({ ...branchUserForm, email: event.target.value })} placeholder="Email" required />
+                <input type="password" value={branchUserForm.password} onChange={event => setBranchUserForm({ ...branchUserForm, password: event.target.value })} placeholder="Password (8+ characters)" minLength={8} required />
+                <select value={branchUserForm.role} onChange={event => setBranchUserForm({ ...branchUserForm, role: event.target.value as 'manager' | 'cashier' })}><option value="cashier">Cashier</option><option value="manager">Manager</option></select>
+                <button className="small-button" disabled={!selectedBranchId}>Create user</button>
+              </form>
+              <div className="inventory-list">{branchUsers.map(branchUser => <div className="inventory-row" key={branchUser.user_id}><div><strong>{branchUser.full_name}</strong><span>{branchUser.email}</span></div><span className="payment-badge">{branchUser.role}</span></div>)}{!branchUsers.length && !branchLoading && <div className="empty-state">No users are assigned to this branch yet.</div>}</div>
+            </section>
+          </div> : view === 'transfers' ? <section className="catalog-panel panel">
+            <div className="panel-heading"><div><h2>Transfer stock</h2><p>Move available stock from {user.branchName} to another branch</p></div><button className="icon-button" onClick={() => void refreshStockTransfers()} aria-label="Refresh transfers"><RefreshCw size={16} /></button></div>
+            <form className="catalog-controls" onSubmit={event => void submitStockTransfer(event)}>
+              <select value={transferDestinationId} onChange={event => setTransferDestinationId(event.target.value)} required>
+                <option value="">Destination branch</option>{branches.filter(branch => branch.branch_id !== user.branchId).map(branch => <option key={branch.branch_id} value={branch.branch_id}>{branch.name}</option>)}
+              </select>
+              <select value={transferProductId} onChange={event => setTransferProductId(event.target.value)} required>
+                <option value="">Product</option>{products.filter(product => Number(product.quantity) > 0).map(product => <option key={product.product_id} value={product.product_id}>{product.name} ({product.quantity} available)</option>)}
+              </select>
+              <input type="number" min="0.001" step="0.001" value={transferQuantity} onChange={event => setTransferQuantity(event.target.value)} aria-label="Transfer quantity" required />
+              <input value={transferNote} onChange={event => setTransferNote(event.target.value)} placeholder="Note (optional)" maxLength={500} />
+              <button className="small-button" disabled={transferSaving || !branches.some(branch => branch.branch_id !== user.branchId)}>{transferSaving ? 'Transferring...' : 'Transfer stock'}</button>
+            </form>
+            <div className="panel-heading"><div><h2>Recent transfers</h2><p>Transfers sent from or received by this branch</p></div></div>
+            {transferLoading ? <div className="dashboard-empty">Loading transfers...</div> : <div className="inventory-list">{stockTransfers.map(transfer => <div className="inventory-row" key={transfer.transfer_id}><div><strong>#{transfer.transfer_id} · {transfer.source_branch} → {transfer.destination_branch}</strong><span>{transfer.items.map(item => `${item.product_name}: ${item.quantity}`).join(' · ')}{transfer.note ? ` · ${transfer.note}` : ''}</span></div><div className="stock-value"><strong>{transfer.transferred_by}</strong><span>{new Date(transfer.created_at).toLocaleString('en-LK')}</span></div></div>)}{!stockTransfers.length && <div className="empty-state">No stock transfers recorded yet.</div>}</div>}
+          </section> : view === 'purchases' ? <section className="catalog-panel panel">
             <div className="panel-heading"><div><h2>Supplier records</h2><p>Maintain suppliers and track purchase costs</p></div><button className="icon-button" onClick={() => void refreshPurchases()} aria-label="Refresh purchasing"><RefreshCw size={16} /></button></div>
             {purchaseLoading && <div className="dashboard-empty">Loading purchasing data...</div>}
             {!purchaseLoading && <><form className="catalog-controls" onSubmit={event => void savePurchaseOrder(event)}><select value={purchaseSupplier} onChange={event => setPurchaseSupplier(event.target.value)} required><option value="">Supplier</option>{suppliers.map(supplier => <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.name}</option>)}</select><select value={purchaseProduct} onChange={event => { setPurchaseProduct(event.target.value); const product = products.find(item => item.product_id === Number(event.target.value)); setPurchaseUnitCost(product?.cost_price ?? ''); }} required><option value="">Product</option>{products.map(product => <option key={product.product_id} value={product.product_id}>{product.name}</option>)}</select><input type="number" min="0.001" step="0.001" value={purchaseQuantity} onChange={event => setPurchaseQuantity(event.target.value)} aria-label="Order quantity" /><input type="number" min="0" step="0.01" value={purchaseUnitCost} onChange={event => setPurchaseUnitCost(event.target.value)} placeholder="Unit cost" aria-label="Unit cost" required /><button className="small-button">Create purchase order</button></form>

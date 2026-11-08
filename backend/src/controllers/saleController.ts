@@ -25,7 +25,8 @@ export async function createSale(req: Request, res: Response, next: NextFunction
 
 export async function listSales(req: Request, res: Response, next: NextFunction) {
   try {
-    const query = salesHistoryQuerySchema.parse(req.query);
+    if (!req.user) throw new Error('Authenticated user context is missing');
+    const query = { ...salesHistoryQuerySchema.parse(req.query), branch_id: req.user.branchId };
     res.json({ success: true, data: await saleService.listSales(query) });
   } catch (error) {
     next(error);
