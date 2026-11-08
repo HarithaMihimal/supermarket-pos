@@ -9,6 +9,7 @@ import { writeAudit } from '../utils/audit';
 function sessionUser(user: {
   user_id: number | string;
   branch_id: number | string;
+  branch_name: string;
   full_name: string;
   email: string;
   role: 'admin' | 'manager' | 'cashier';
@@ -16,6 +17,7 @@ function sessionUser(user: {
   return {
     userId: Number(user.user_id),
     branchId: Number(user.branch_id),
+    branchName: user.branch_name,
     fullName: user.full_name,
     email: user.email,
     role: user.role,
