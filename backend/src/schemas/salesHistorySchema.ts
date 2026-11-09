@@ -8,4 +8,4 @@ export const salesHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 }).strict();
 
-export type SalesHistoryQuery = z.infer<typeof salesHistoryQuerySchema>;
+export type SalesHistoryQuery = z.infer<typeof salesHistoryQuerySchema> & { branch_id: number };

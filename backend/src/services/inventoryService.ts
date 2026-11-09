@@ -1,8 +1,8 @@
 import * as inventoryRepository from '../repositories/inventoryRepository';
 import { InventoryAdjustmentInput } from '../schemas/inventorySchema';
 
-export function listInventory(search?: string, lowStockOnly = false, branchId = 1) {
-  return inventoryRepository.listInventory(search, lowStockOnly, branchId);
+export function listInventory(branchId: number, search?: string, lowStockOnly = false) {
+  return inventoryRepository.listInventory(branchId, search, lowStockOnly);
 }
 
 export function adjustInventory(data: InventoryAdjustmentInput, branchId: number) {

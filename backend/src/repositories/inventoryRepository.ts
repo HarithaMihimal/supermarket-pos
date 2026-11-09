@@ -2,7 +2,7 @@ import { pool } from '../config/database';
 import { InventoryAdjustmentInput, StockTransferInput } from '../schemas/inventorySchema';
 import { AppError } from '../utils/AppError';
 
-export async function listInventory(search?: string, lowStockOnly = false, branchId = 1) {
+export async function listInventory(branchId: number, search?: string, lowStockOnly = false) {
   const values: (string | number)[] = [branchId];
   const filters = ['i.branch_id = $1', 'p.active = TRUE'];
 

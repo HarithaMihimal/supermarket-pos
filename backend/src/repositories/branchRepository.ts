@@ -20,9 +20,11 @@ export async function createBranch(data: BranchInput) {
       RETURNING branch_id, name, address
     `, [data.name, data.address ?? null]);
     await client.query(`
-      INSERT INTO inventory (branch_id, product_id, quantity)
-      SELECT $1, product_id, 0
-      FROM products
+      INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
+      SELECT b.branch_id, p.product_id, 0, b.default_reorder_level
+      FROM branches b
+      CROSS JOIN products p
+      WHERE b.branch_id = $1
       ON CONFLICT (branch_id, product_id) DO NOTHING
     `, [result.rows[0].branch_id]);
     await client.query('COMMIT');

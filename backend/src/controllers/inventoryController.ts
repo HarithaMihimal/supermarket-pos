@@ -11,7 +11,7 @@ export async function listInventory(req: Request, res: Response, next: NextFunct
 
     res.json({
       success: true,
-      data: await inventoryService.listInventory(search, lowStockOnly, req.user.branchId),
+      data: await inventoryService.listInventory(req.user.branchId, search, lowStockOnly),
     });
   } catch (error) {
     next(error);

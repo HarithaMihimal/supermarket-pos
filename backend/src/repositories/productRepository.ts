@@ -67,7 +67,8 @@ export async function createProduct(data: ProductInput, branchId: number) {
     ]);
     await client.query(
       `INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
-       SELECT branch_id, $1, CASE WHEN branch_id = $2 THEN $3 ELSE 0 END, $4
+       SELECT branch_id, $1, CASE WHEN branch_id = $2 THEN $3 ELSE 0 END,
+         CASE WHEN branch_id = $2 THEN $4 ELSE default_reorder_level END
        FROM branches
        ON CONFLICT (branch_id, product_id) DO NOTHING`,
       [result.rows[0].product_id, branchId, data.initial_quantity, data.reorder_level],
@@ -126,11 +127,12 @@ export async function importProducts(rows: ProductImportRow[], branchId: number,
       ]);
       await client.query(
         `INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
-         SELECT branch_id, $1, CASE WHEN branch_id = $2 THEN $3 ELSE 0 END, $4
+         SELECT branch_id, $1, CASE WHEN branch_id = $2 THEN $3 ELSE 0 END,
+           CASE WHEN branch_id = $2 THEN $4 ELSE default_reorder_level END
          FROM branches
          ON CONFLICT (branch_id, product_id) DO UPDATE SET
            quantity = CASE WHEN inventory.branch_id = $2 THEN EXCLUDED.quantity ELSE inventory.quantity END,
-           reorder_level = EXCLUDED.reorder_level`,
+           reorder_level = CASE WHEN inventory.branch_id = $2 THEN EXCLUDED.reorder_level ELSE inventory.reorder_level END`,
         [product.rows[0].product_id, branchId, row.initial_quantity, row.reorder_level],
       );
       imported.push(product.rows[0]);
