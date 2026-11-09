@@ -3,8 +3,9 @@ import test from 'node:test';
 import { loginSchema, signupSchema } from '../src/schemas/authSchema';
 import { saleSchema } from '../src/schemas/saleSchema';
 import { productSchema } from '../src/schemas/productSchema';
-import { inventoryAdjustmentSchema } from '../src/schemas/inventorySchema';
+import { inventoryAdjustmentSchema, stockTransferSchema } from '../src/schemas/inventorySchema';
 import { reportQuerySchema } from '../src/schemas/reportSchema';
+import { salesHistoryQuerySchema } from '../src/schemas/salesHistorySchema';
 
 test('login schema rejects malformed credentials', () => {
   assert.equal(loginSchema.safeParse({ email: 'not-an-email', password: '' }).success, false);
@@ -55,6 +56,35 @@ test('inventory adjustment schema accepts numeric values returned by PostgreSQL'
     assert.equal(result.data.product_id, 1);
     assert.equal(result.data.quantity_delta, 2);
   }
+});
+
+test('inventory adjustments cannot select another branch', () => {
+  assert.equal(inventoryAdjustmentSchema.safeParse({
+    branch_id: 2,
+    product_id: 1,
+    quantity_delta: 1,
+    reason: 'adjustment',
+  }).success, false);
+});
+
+test('stock transfer schema validates precision and rejects duplicate products', () => {
+  assert.equal(stockTransferSchema.safeParse({
+    destination_branch_id: 2,
+    items: [{ product_id: 1, quantity: 1.125 }],
+  }).success, true);
+  assert.equal(stockTransferSchema.safeParse({
+    destination_branch_id: 2,
+    items: [{ product_id: 1, quantity: 1 }, { product_id: 1, quantity: 2 }],
+  }).success, false);
+  assert.equal(stockTransferSchema.safeParse({
+    destination_branch_id: 2,
+    items: [{ product_id: 1, quantity: 1.0001 }],
+  }).success, false);
+});
+
+test('sales history requests cannot select another branch', () => {
+  assert.equal(salesHistoryQuerySchema.safeParse({ branch_id: 2 }).success, false);
+  assert.equal(salesHistoryQuerySchema.safeParse({ payment_method: 'cash' }).success, true);
 });
 
 test('report query accepts valid date ranges and grouping', () => {

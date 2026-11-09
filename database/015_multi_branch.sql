@@ -7,8 +7,8 @@ WHERE branch_id IS NULL;
 ALTER TABLE users
   ALTER COLUMN branch_id SET NOT NULL;
 
-INSERT INTO inventory (branch_id, product_id, quantity)
-SELECT b.branch_id, p.product_id, 0
+INSERT INTO inventory (branch_id, product_id, quantity, reorder_level)
+SELECT b.branch_id, p.product_id, 0, b.default_reorder_level
 FROM branches b
 CROSS JOIN products p
 ON CONFLICT (branch_id, product_id) DO NOTHING;
