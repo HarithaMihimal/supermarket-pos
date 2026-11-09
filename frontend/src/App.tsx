@@ -610,8 +610,16 @@ function App() {
       const response = await api.get<{ data: Branch[] }>('/branches');
       const result = response.data.data.map(branch => ({ ...branch, branch_id: Number(branch.branch_id) }));
       setBranches(result);
-      setSelectedBranchId(current => current || String(result[0]?.branch_id ?? ''));
-      setTransferDestinationId(current => current || String(result.find(branch => branch.branch_id !== user?.branchId)?.branch_id ?? ''));
+      const selectedBranch = result.some(branch => String(branch.branch_id) === selectedBranchId)
+        ? selectedBranchId
+        : String(result[0]?.branch_id ?? '');
+      const destinationBranch = result.some(branch => String(branch.branch_id) === transferDestinationId
+        && branch.branch_id !== user?.branchId)
+        ? transferDestinationId
+        : String(result.find(branch => branch.branch_id !== user?.branchId)?.branch_id ?? '');
+      setSelectedBranchId(selectedBranch);
+      setTransferDestinationId(destinationBranch);
+      if (view === 'branches') await refreshBranchUsers(selectedBranch);
     } catch (error) {
       const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
       setNotice({ type: 'error', text: message ?? 'Could not load branches.' });
@@ -634,6 +642,16 @@ function App() {
     }
   }
 
+  async function showBranches() {
+    setView('branches');
+    await refreshBranches();
+  }
+
+  async function showTransfers() {
+    setView('transfers');
+    await Promise.all([refreshBranches(), refreshStockTransfers()]);
+  }
+
   async function saveBranch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
@@ -643,6 +661,7 @@ function App() {
       setSelectedBranchId(String(branch.branch_id));
       setBranchForm({ name: '', address: '' });
       setNotice({ type: 'success', text: `${branch.name} created.` });
+      await refreshBranchUsers(String(branch.branch_id));
     } catch (error) {
       const responseData = (error as { response?: { data?: { message?: string; errors?: { field: string; message: string }[] } } }).response?.data;
       setNotice({ type: 'error', text: responseData?.errors?.[0]?.message ?? responseData?.message ?? 'Could not create branch.' });
@@ -808,19 +827,7 @@ function App() {
     // Dashboard data is refreshed whenever its view becomes active.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (view === 'dashboard') void refreshDashboard();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
-
-  useEffect(() => {
-    if (view === 'branches' || view === 'transfers') void refreshBranches();
-    if (view === 'transfers') void refreshStockTransfers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
-
-  useEffect(() => {
-    if (view === 'branches' && selectedBranchId) void refreshBranchUsers(selectedBranchId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, selectedBranchId]);
 
   useEffect(() => {
     if (!user) return;
@@ -833,7 +840,6 @@ function App() {
 
   useEffect(() => {
     // Inventory filters are persisted by fetching the matching server view.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (view === 'inventory') void refreshInventory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, inventorySearch, lowStockOnly]);
@@ -849,7 +855,6 @@ function App() {
     // Purchasing data is synchronized when its workspace becomes active.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (view === 'purchases') void refreshPurchases();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   const filteredProducts = useMemo(() => {
@@ -1060,8 +1065,8 @@ function App() {
             <button className={`nav-item ${view === 'sales' ? 'active' : ''}`} onClick={() => setView('sales')}><Receipt size={18} /> Sales history</button>
             <button className={`nav-item ${view === 'returns' ? 'active' : ''}`} onClick={() => setView('returns')}><RotateCcw size={18} /> Returns</button>
             {canManageProducts() && <button className={`nav-item ${view === 'purchases' ? 'active' : ''}`} onClick={() => setView('purchases')}><Truck size={18} /> Purchasing</button>}
-            {canManageProducts() && <button className={`nav-item ${view === 'transfers' ? 'active' : ''}`} onClick={() => setView('transfers')}><ArrowLeftRight size={18} /> Stock transfers</button>}
-            {user.role === 'admin' && <button className={`nav-item ${view === 'branches' ? 'active' : ''}`} onClick={() => setView('branches')}><Building2 size={18} /> Branches & users</button>}
+            {canManageProducts() && <button className={`nav-item ${view === 'transfers' ? 'active' : ''}`} onClick={() => void showTransfers()}><ArrowLeftRight size={18} /> Stock transfers</button>}
+            {user.role === 'admin' && <button className={`nav-item ${view === 'branches' ? 'active' : ''}`} onClick={() => void showBranches()}><Building2 size={18} /> Branches & users</button>}
           </nav>
           <div className="sidebar-footer">v1.0.0 <span>●</span> System online</div>
         </aside>
